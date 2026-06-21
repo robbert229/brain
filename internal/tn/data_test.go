@@ -13,6 +13,7 @@ func TestDecode_YAMLFrontmatterAndBody(t *testing.T) {
 status: open
 priority: normal
 scheduled: 2026-06-20
+due: 2026-06-21
 dateCreated: 2026-06-20T13:48:44.160-07:00
 dateModified: 2026-06-20T13:48:44.160-07:00
 tags:
@@ -27,6 +28,8 @@ tags:
 	require.Equal(t, "normal", note.Priority)
 	require.NotNil(t, note.Scheduled)
 	require.Equal(t, "2026-06-20", note.Scheduled.Format("2006-01-02"))
+	require.NotNil(t, note.Due)
+	require.Equal(t, "2026-06-21", note.Due.Format("2006-01-02"))
 	require.NotNil(t, note.DateCreated)
 	require.NotNil(t, note.DateModified)
 	require.Len(t, note.Tags, 1)
@@ -87,6 +90,7 @@ nested:
 
 func TestEncode_ProducesYAMLFrontmatter(t *testing.T) {
 	scheduled := time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)
+	due := time.Date(2026, 6, 21, 0, 0, 0, 0, time.UTC)
 	created := time.Date(2026, 6, 20, 13, 48, 44, 160000000, time.FixedZone("PDT", -7*3600))
 	modified := created.Add(5 * time.Minute)
 
@@ -94,6 +98,7 @@ func TestEncode_ProducesYAMLFrontmatter(t *testing.T) {
 		Status:       "open",
 		Priority:     "normal",
 		Scheduled:    &scheduled,
+		Due:          &due,
 		DateCreated:  &created,
 		DateModified: &modified,
 		Tags:         []string{"task"},
@@ -107,6 +112,7 @@ func TestEncode_ProducesYAMLFrontmatter(t *testing.T) {
 		"status: open",
 		"priority: normal",
 		"scheduled: \"2026-06-20\"",
+		"due: \"2026-06-21\"",
 		"dateCreated: \"2026-06-20T13:48:44.16-07:00\"",
 		"dateModified: \"2026-06-20T13:53:44.16-07:00\"",
 		"tags:",

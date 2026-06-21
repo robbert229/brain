@@ -32,7 +32,8 @@ go test ./...
 
 ## TaskNotes
 
-The TaskNotes CLI is a re-implementation of the TaskNotes CLI written in Go. 
+The TaskNotes CLI is a re-implementation of the TaskNotes CLI written in Go. It is completely daemonless and functions
+without any dependency on Obsidian. 
 
 ```
 # Create task (natural language parsed)

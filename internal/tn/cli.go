@@ -3,184 +3,135 @@ package tn
 import (
 	"context"
 	"fmt"
-	"io"
 	"sort"
 	"strings"
-
-	"github.com/fatih/color"
-)
-
-var (
-	colorCyan  = color.FgCyan
-	colorBlue  = color.FgBlue
-	colorWhite = color.FgWhite
+	"time"
 )
 
 type ListRequest struct {
-	WorkingDirectory string
-
 	Today     bool
 	Overdue   bool
 	Completed bool
 	Filter    string
 	JSON      bool
 	Limit     int
+	Now       time.Time
 }
 
-func StubInteractiveMode(stdout io.Writer) error {
-	_, err := fmt.Fprintln(stdout, "[stub] tn interactive mode")
-	return err
+type ListResult struct {
+	Notes      []*TaskNote
+	FoundCount int
 }
 
-func StubCreate(stdout io.Writer, args []string) error {
-	_, err := fmt.Fprintf(stdout, "[stub] tn create: %s\n", strings.Join(args, " "))
-	return err
+type TaskNoteService struct {
+	Repository TaskNoteRepository
 }
 
-func listPrintHeader(stdout io.Writer, req ListRequest, notes []*TaskNote) error {
-	fmt.Fprintf(stdout, "%s Found %d tasks\n\n", color.CyanString("✔"), len(notes))
-	if len(notes) == 0 {
-		fmt.Fprintf(stdout, "\n\nℹ No tasks found matching your criteria\n")
-		return nil
+func NewTaskNoteService(repository TaskNoteRepository) TaskNoteService {
+	return TaskNoteService{Repository: repository}
+}
+
+func (service TaskNoteService) List(ctx context.Context, req ListRequest) (ListResult, error) {
+	now := req.Now
+	if now.IsZero() {
+		now = time.Now()
 	}
 
-	if req.Today {
-		fmt.Fprintf(stdout, "Today's Tasks:\n")
-	} else if req.Overdue {
-		fmt.Fprintf(stdout, "Overdue Tasks:\n")
-	} else if req.Completed {
-		fmt.Fprintf(stdout, "Completed Tasks:\n")
+	repo := service.Repository
+	if repo == nil {
+		return ListResult{}, fmt.Errorf("task note repository is required")
 	}
 
-	fmt.Fprintf(stdout, "%s\n", strings.Repeat("─", 50))
-
-	return nil
-}
-
-func listPrintTasks(stdout io.Writer, notes []*TaskNote) error {
-	for i, note := range notes {
-		if i != 0 {
-			fmt.Fprintf(stdout, "\n\n")
-		}
-
-		err := listPrintTask(stdout, note)
-		if err != nil {
-			return fmt.Errorf("print task note: %w", err)
-		}
-	}
-
-	return nil
-}
-
-func List(ctx context.Context, stdout io.Writer, req ListRequest) error {
 	var notes []*TaskNote
-	err := Crawl(ctx, req.WorkingDirectory, func(note *TaskNote) error {
+	err := repo.Crawl(ctx, func(note *TaskNote) error {
+		if !matchesListRequest(note, req, now) {
+			return nil
+		}
+
 		notes = append(notes, note)
 
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to crawl tasks: %w", err)
+		return ListResult{}, fmt.Errorf("failed to crawl tasks: %w", err)
 	}
 
 	sort.Slice(notes, func(i, j int) bool {
 		return notes[i].ID < notes[j].ID
 	})
 
-	err = listPrintHeader(stdout, req, notes)
-	if err != nil {
-		return fmt.Errorf("failed to print list header: %w", err)
-	}
+	foundCount := len(notes)
+	notes = limitTaskNotes(notes, req.Limit)
 
-	err = listPrintTasks(stdout, notes)
-	if err != nil {
-		return fmt.Errorf("failed to print tasks: %w", err)
-	}
-
-	return nil
+	return ListResult{
+		Notes:      notes,
+		FoundCount: foundCount,
+	}, nil
 }
 
-func StubComplete(stdout io.Writer, taskID string) error {
-	_, err := fmt.Fprintf(stdout, "[stub] tn complete %s\n", taskID)
-	return err
-}
-
-func StubToggle(stdout io.Writer, taskID string) error {
-	_, err := fmt.Fprintf(stdout, "[stub] tn toggle %s\n", taskID)
-	return err
-}
-
-func StubArchive(stdout io.Writer, taskID string) error {
-	_, err := fmt.Fprintf(stdout, "[stub] tn archive %s\n", taskID)
-	return err
-}
-
-func StubDelete(stdout io.Writer, taskID string, force bool) error {
-	_, err := fmt.Fprintf(stdout, "[stub] tn delete %s force=%t\n", taskID, force)
-	return err
-}
-
-func StubUpdate(
-	stdout io.Writer,
-	taskID, status, priority, due, addTags, removeTags, addContexts, addProjects string,
-) error {
-	_, err := fmt.Fprintf(
-		stdout,
-		"[stub] tn update %s status=%q priority=%q due=%q add-tags=%q remove-tags=%q add-contexts=%q add-projects=%q\n",
-		taskID,
-		status,
-		priority,
-		due,
-		addTags,
-		removeTags,
-		addContexts,
-		addProjects,
-	)
-	return err
-}
-
-func StubSearch(stdout io.Writer, query string) error {
-	_, err := fmt.Fprintf(stdout, "[stub] tn search %q\n", query)
-	return err
-}
-
-func listPrintTask(stdout io.Writer, note *TaskNote) error {
-	_, err := fmt.Fprintf(
-		stdout,
-		"%s %s\n",
-		color.HiWhiteString("○ %s", note.Title),
-		color.CyanString("[%s]", strings.ToUpper(note.Priority)),
-	)
-	if err != nil {
-		return err
+func matchesListRequest(note *TaskNote, req ListRequest, now time.Time) bool {
+	if req.Today && !isTaskToday(note, now) {
+		return false
+	}
+	if req.Overdue && !isTaskOverdue(note, now) {
+		return false
+	}
+	if req.Completed && !isTaskCompleted(note) {
+		return false
 	}
 
-	var tags string
-	if len(note.Tags) > 0 {
-		tags = "#" + strings.Join(note.Tags, " #")
+	return true
+}
 
+func limitTaskNotes(notes []*TaskNote, limit int) []*TaskNote {
+	if limit <= 0 || len(notes) <= limit {
+		return notes
 	}
 
-	_, err = fmt.Fprintf(stdout, "  Tags: %s\n", color.HiWhiteString(tags))
-	if err != nil {
-		return err
+	return notes[:limit]
+}
+
+func isTaskToday(note *TaskNote, now time.Time) bool {
+	return sameDate(note.Due, now) || sameDate(note.Scheduled, now)
+}
+
+func isTaskOverdue(note *TaskNote, now time.Time) bool {
+	if note.Due == nil || isTaskCompleted(note) {
+		return false
 	}
 
-	if note.Scheduled != nil {
-		_, err = fmt.Fprintf(
-			stdout,
-			"  Scheduled: %s\n",
-			color.BlueString(note.Scheduled.Format("2006-01-02 15:04")),
-		)
-		if err != nil {
-			return err
-		}
+	return compareDate(note.Due, now) < 0
+}
+
+func isTaskCompleted(note *TaskNote) bool {
+	switch strings.ToLower(strings.TrimSpace(note.Status)) {
+	case StatusClosed, StatusCompleted, StatusDone:
+		return true
+	default:
+		return false
+	}
+}
+
+func sameDate(t *time.Time, now time.Time) bool {
+	if t == nil {
+		return false
 	}
 
-	_, err = fmt.Fprintf(stdout, "  ID: %s\n", note.ID)
-	if err != nil {
-		return err
+	return compareDate(t, now) == 0
+}
+
+func compareDate(t *time.Time, now time.Time) int {
+	taskYear, taskMonth, taskDay := t.Date()
+	nowYear, nowMonth, nowDay := now.Date()
+	taskDate := time.Date(taskYear, taskMonth, taskDay, 0, 0, 0, 0, time.UTC)
+	today := time.Date(nowYear, nowMonth, nowDay, 0, 0, 0, 0, time.UTC)
+
+	if taskDate.Before(today) {
+		return -1
+	}
+	if taskDate.After(today) {
+		return 1
 	}
 
-	return nil
+	return 0
 }

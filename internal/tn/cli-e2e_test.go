@@ -10,7 +10,9 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/robbert229/brain/internal/cli/tncli"
 	"github.com/robbert229/brain/internal/tn"
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
@@ -99,22 +101,36 @@ func TestCLIE2E_Fixtures(t *testing.T) {
 
 			stubArgs, err := parseListStubArgs(cfg.Cmd)
 			require.NoError(t, err)
+			now, err := parseScenarioDate(cfg.Date)
+			require.NoError(t, err)
 
 			buf := bytes.NewBuffer(nil)
+			service := tn.NewTaskNoteService(tn.NewDiskTaskNoteRepository(filepath.Join(scenarioDir, "vault")))
 
-			err = tn.List(t.Context(), buf, tn.ListRequest{
-				WorkingDirectory: filepath.Join(scenarioDir, "vault"),
-
+			req := tn.ListRequest{
 				Today:     stubArgs.today,
 				Overdue:   stubArgs.overdue,
 				Completed: stubArgs.completed,
 				Filter:    stubArgs.filter,
 				JSON:      stubArgs.json,
 				Limit:     stubArgs.limit,
-			})
+				Now:       now,
+			}
+			result, err := service.List(t.Context(), req)
+			require.NoError(t, err)
+
+			err = tncli.PrintList(buf, req, result)
 			require.NoError(t, err)
 
 			require.Equal(t, cfg.Output, buf.String())
 		})
 	}
+}
+
+func parseScenarioDate(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+
+	return time.Parse("Mon Jan 2 03:04:05 PM MST 2006", value)
 }

@@ -8,16 +8,31 @@ import (
 	"strings"
 )
 
-// Crawl crawls all notes in the specified directory.
+// TaskNoteRepository provides access to TaskNotes.
+type TaskNoteRepository interface {
+	Crawl(ctx context.Context, fn func(*TaskNote) error) error
+}
+
+// DiskTaskNoteRepository reads TaskNotes from a directory on disk.
+type DiskTaskNoteRepository struct {
+	workingDirectory string
+}
+
+// NewDiskTaskNoteRepository creates a repository backed by workingDirectory.
+func NewDiskTaskNoteRepository(workingDirectory string) DiskTaskNoteRepository {
+	return DiskTaskNoteRepository{workingDirectory: workingDirectory}
+}
+
+// Crawl crawls all notes in the repository's working directory.
 // It recursively walks the directory, finds all .md files,
 // decodes them as TaskNotes, and invokes fn on each successfully decoded note.
 // If fn returns an error, Crawl stops and returns that error.
-func Crawl(ctx context.Context, workingDirectory string, fn func(*TaskNote) error) error {
-	if _, err := os.Stat(workingDirectory); err != nil {
+func (repo DiskTaskNoteRepository) Crawl(ctx context.Context, fn func(*TaskNote) error) error {
+	if _, err := os.Stat(repo.workingDirectory); err != nil {
 		return fmt.Errorf("stat directory: %w", err)
 	}
 
-	return filepath.WalkDir(workingDirectory, func(path string, d os.DirEntry, err error) error {
+	return filepath.WalkDir(repo.workingDirectory, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("failed to walk directory: %w", err)
 		}
@@ -35,7 +50,7 @@ func Crawl(ctx context.Context, workingDirectory string, fn func(*TaskNote) erro
 			return fmt.Errorf("read file %q: %w", path, err)
 		}
 
-		taskID, err := filepath.Rel(workingDirectory, path)
+		taskID, err := filepath.Rel(repo.workingDirectory, path)
 		if err != nil {
 			return fmt.Errorf("get relative path: %w", err)
 		}

@@ -35,9 +35,11 @@ var (
 
 // Common TaskNotes statuses.
 const (
-	StatusOpen   = "open"
-	StatusClosed = "closed"
-	StatusNone   = "none"
+	StatusOpen      = "open"
+	StatusClosed    = "closed"
+	StatusCompleted = "completed"
+	StatusDone      = "done"
+	StatusNone      = "none"
 )
 
 // Common TaskNotes priorities.
@@ -65,6 +67,8 @@ type TaskNote struct {
 	Priority string
 	// Scheduled maps to the frontmatter "scheduled" value.
 	Scheduled *time.Time
+	// Due maps to the frontmatter "due" value.
+	Due *time.Time
 	// DateCreated maps to the frontmatter "dateCreated" value.
 	DateCreated *time.Time
 	// DateModified maps to the frontmatter "dateModified" value.
@@ -83,6 +87,7 @@ type frontmatter struct {
 	Status       string   `yaml:"status,omitempty"`
 	Priority     string   `yaml:"priority,omitempty"`
 	Scheduled    string   `yaml:"scheduled,omitempty"`
+	Due          string   `yaml:"due,omitempty"`
 	DateCreated  string   `yaml:"dateCreated,omitempty"`
 	DateModified string   `yaml:"dateModified,omitempty"`
 	Tags         []string `yaml:"tags,omitempty"`
@@ -118,6 +123,16 @@ func Decode(id string, content string) (*TaskNote, error) {
 			note.Scheduled = &t
 		}
 
+		if fm.Due != "" {
+			t, err := parseWithLayouts(fm.Due, scheduledLayouts)
+			if err != nil {
+				return nil, fmt.Errorf("parse due: %w", err)
+			}
+
+			t.Round(time.Hour * 24)
+			note.Due = &t
+		}
+
 		if fm.DateCreated != "" {
 			t, err := parseWithLayouts(fm.DateCreated, dateTimeLayouts)
 			if err != nil {
@@ -139,7 +154,7 @@ func Decode(id string, content string) (*TaskNote, error) {
 			return nil, fmt.Errorf("parse frontmatter map: %w", err)
 		}
 
-		for _, k := range []string{"status", "priority", "scheduled", "dateCreated", "dateModified", "tags"} {
+		for _, k := range []string{"status", "priority", "scheduled", "due", "dateCreated", "dateModified", "tags"} {
 			delete(raw, k)
 		}
 		note.Extra = raw
@@ -231,6 +246,9 @@ func buildFrontmatterNode(note *TaskNote) (*yaml.Node, error) {
 	}
 	if note.Scheduled != nil {
 		appendScalar("scheduled", note.Scheduled.Format(dateLayout))
+	}
+	if note.Due != nil {
+		appendScalar("due", note.Due.Format(dateLayout))
 	}
 	if note.DateCreated != nil {
 		appendScalar("dateCreated", note.DateCreated.Format(time.RFC3339Nano))

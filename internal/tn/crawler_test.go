@@ -9,8 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCrawl_WalksDirectoryAndDecodesMarkdownFiles(t *testing.T) {
+func TestDiskTaskNoteRepository_Crawl_WalksDirectoryAndDecodesMarkdownFiles(t *testing.T) {
 	tmpDir := t.TempDir()
+	repo := NewDiskTaskNoteRepository(tmpDir)
 
 	// Create test markdown files
 	file1 := filepath.Join(tmpDir, "task1.md")
@@ -45,7 +46,7 @@ Second task description.`
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "readme.txt"), []byte("not markdown"), 0644))
 
 	var notes []*TaskNote
-	err := Crawl(t.Context(), tmpDir, func(note *TaskNote) error {
+	err := repo.Crawl(t.Context(), func(note *TaskNote) error {
 		notes = append(notes, note)
 		return nil
 	})
@@ -77,16 +78,19 @@ Second task description.`
 	require.Equal(t, "low", task2.Priority)
 }
 
-func TestCrawl_DirectoryNotFound(t *testing.T) {
-	err := Crawl(t.Context(), "/nonexistent/directory", func(_ *TaskNote) error {
+func TestDiskTaskNoteRepository_Crawl_DirectoryNotFound(t *testing.T) {
+	repo := NewDiskTaskNoteRepository("/nonexistent/directory")
+
+	err := repo.Crawl(t.Context(), func(_ *TaskNote) error {
 		return nil
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "stat directory")
 }
 
-func TestCrawl_StopsOnCallbackError(t *testing.T) {
+func TestDiskTaskNoteRepository_Crawl_StopsOnCallbackError(t *testing.T) {
 	tmpDir := t.TempDir()
+	repo := NewDiskTaskNoteRepository(tmpDir)
 
 	file1 := filepath.Join(tmpDir, "task1.md")
 	file2 := filepath.Join(tmpDir, "task2.md")
@@ -103,7 +107,7 @@ tags:
 
 	callCount := 0
 	testErr := errors.New("test callback error")
-	err := Crawl(t.Context(), tmpDir, func(_ *TaskNote) error {
+	err := repo.Crawl(t.Context(), func(_ *TaskNote) error {
 		callCount++
 		if callCount == 1 {
 			return nil
@@ -117,13 +121,14 @@ tags:
 	require.Equal(t, 2, callCount)
 }
 
-func TestCrawl_InvalidMarkdownFile(t *testing.T) {
+func TestDiskTaskNoteRepository_Crawl_InvalidMarkdownFile(t *testing.T) {
 	tmpDir := t.TempDir()
+	repo := NewDiskTaskNoteRepository(tmpDir)
 
 	file := filepath.Join(tmpDir, "invalid.md")
 	require.NoError(t, os.WriteFile(file, []byte("---\ninvalid: [syntax"), 0644))
 
-	err := Crawl(t.Context(), tmpDir, func(_ *TaskNote) error {
+	err := repo.Crawl(t.Context(), func(_ *TaskNote) error {
 		return nil
 	})
 
@@ -131,11 +136,12 @@ func TestCrawl_InvalidMarkdownFile(t *testing.T) {
 	require.Contains(t, err.Error(), "decode file")
 }
 
-func TestCrawl_EmptyDirectory(t *testing.T) {
+func TestDiskTaskNoteRepository_Crawl_EmptyDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
+	repo := NewDiskTaskNoteRepository(tmpDir)
 
 	callCount := 0
-	err := Crawl(t.Context(), tmpDir, func(_ *TaskNote) error {
+	err := repo.Crawl(t.Context(), func(_ *TaskNote) error {
 		callCount++
 		return nil
 	})

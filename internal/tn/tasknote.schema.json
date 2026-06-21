@@ -1,0 +1,302 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/tasknotes-task-record.schema.json",
+  "title": "TaskNotes Task Record",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "frontmatter"
+  ],
+  "properties": {
+    "frontmatter": {
+      "$ref": "#/$defs/taskFrontmatter"
+    },
+    "body": {
+      "type": "string",
+      "description": "Freeform markdown body. Non-normative for task semantics."
+    },
+    "file": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "modified": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "taskFrontmatter": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "title",
+        "status",
+        "date_created",
+        "date_modified"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable task identity token."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "type": "string",
+          "minLength": 1
+        },
+        "completed_date": {
+          "$ref": "#/$defs/date"
+        },
+        "date_created": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "date_modified": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "priority": {
+          "type": "string"
+        },
+        "due": {
+          "$ref": "#/$defs/dateOrDateTime"
+        },
+        "scheduled": {
+          "$ref": "#/$defs/dateOrDateTime"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "contexts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Project reference, often represented as a link."
+          },
+          "uniqueItems": true
+        },
+        "time_estimate": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Estimated duration in minutes."
+        },
+        "time_entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/timeEntry"
+          }
+        },
+        "recurrence": {
+          "type": "string",
+          "description": "TaskNotes recurrence string."
+        },
+        "recurrence_anchor": {
+          "type": "string",
+          "enum": [
+            "scheduled",
+            "completion"
+          ]
+        },
+        "complete_instances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/date"
+          },
+          "uniqueItems": true
+        },
+        "skipped_instances": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/date"
+          },
+          "uniqueItems": true
+        },
+        "recurrence_parent": {
+          "type": "string"
+        },
+        "occurrence_date": {
+          "$ref": "#/$defs/date"
+        },
+        "occurrence_materialization": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "on_completion",
+            "rolling"
+          ]
+        },
+        "occurrence_next_trigger": {
+          "type": "string",
+          "enum": [
+            "completion",
+            "completion_or_skip"
+          ]
+        },
+        "occurrence_template": {
+          "type": "string"
+        },
+        "occurrence_past_horizon": {
+          "$ref": "#/$defs/isoDuration"
+        },
+        "occurrence_future_horizon": {
+          "$ref": "#/$defs/isoDuration"
+        },
+        "blocked_by": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dependency"
+          }
+        },
+        "reminders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/reminder"
+          }
+        }
+      },
+      "$comment": "TaskNotes requires completed_date only for non-recurring tasks whose status is in configured status.completed_values. That rule depends on implementation config and should be enforced by a validator outside this generic schema. If title.storage=filename, title may be resolved from the filename rather than frontmatter; remove title from required for raw frontmatter validation."
+    },
+    "timeEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startTime"
+      ],
+      "properties": {
+        "startTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "endTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "uid",
+        "reltype"
+      ],
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reltype": {
+          "type": "string",
+          "minLength": 1
+        },
+        "gap": {
+          "$ref": "#/$defs/isoDuration"
+        }
+      }
+    },
+    "reminder": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "id",
+            "type",
+            "absoluteTime"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "const": "absolute"
+            },
+            "absoluteTime": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "description": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "id",
+            "type",
+            "relatedTo",
+            "offset"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "type": {
+              "const": "relative"
+            },
+            "relatedTo": {
+              "type": "string",
+              "minLength": 1
+            },
+            "offset": {
+              "$ref": "#/$defs/isoDuration"
+            },
+            "description": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "dateOrDateTime": {
+      "type": "string",
+      "anyOf": [
+        {
+          "format": "date"
+        },
+        {
+          "format": "date-time"
+        }
+      ]
+    },
+    "isoDuration": {
+      "type": "string",
+      "pattern": "^-?P(?=\\d|T\\d)(?:\\d+Y)?(?:\\d+M)?(?:\\d+W)?(?:\\d+D)?(?:T(?:\\d+H)?(?:\\d+M)?(?:\\d+(?:\\.\\d+)?S)?)?$"
+    }
+  }
+}

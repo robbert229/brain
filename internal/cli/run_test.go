@@ -96,20 +96,11 @@ func TestRun_TNListFlags(t *testing.T) {
 	}
 
 	got := strings.TrimSpace(out.String())
-	if !strings.Contains(got, "[stub] tn list") {
+	if !strings.Contains(got, "Found 0 tasks") {
 		t.Fatalf("unexpected tn list output: %q", got)
 	}
-	if !strings.Contains(got, `today=true overdue=true completed=true`) {
-		t.Fatalf("expected list state flags in output: %q", got)
-	}
-	if !strings.Contains(got, `filter="priority:urgent AND tags:work"`) {
-		t.Fatalf("expected list filter in output: %q", got)
-	}
-	if !strings.Contains(got, `json=true`) {
-		t.Fatalf("expected json flag in output: %q", got)
-	}
-	if !strings.Contains(got, `limit=10`) {
-		t.Fatalf("expected limit flag in output: %q", got)
+	if !strings.Contains(got, "No tasks found matching your criteria") {
+		t.Fatalf("expected empty list output: %q", got)
 	}
 }
 
@@ -123,8 +114,8 @@ func TestRun_TNListDefaultLimit(t *testing.T) {
 	}
 
 	got := strings.TrimSpace(out.String())
-	if !strings.Contains(got, `limit=20`) {
-		t.Fatalf("expected default limit in output: %q", got)
+	if !strings.Contains(got, "Found 0 tasks") {
+		t.Fatalf("unexpected tn list output: %q", got)
 	}
 }
 
@@ -169,4 +160,3 @@ func TestRun_TNSearch(t *testing.T) {
 		t.Fatalf("unexpected tn search output: %q", got)
 	}
 }
-
