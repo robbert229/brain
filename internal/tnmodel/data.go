@@ -1,4 +1,3 @@
-// Package tn provides TaskNotes format parsing and manipulation utilities.
 package tnmodel
 
 import (
@@ -10,9 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const (
-	dateLayout = "2006-01-02"
-)
+const dateLayout = "2006-01-02"
 
 var (
 	scheduledLayouts = []string{
@@ -49,53 +46,8 @@ const (
 	PriorityHigh   = "high"
 )
 
-// TaskNote represents one TaskNotes document.
-//
-// The supported YAML frontmatter fields map to Status, Priority, Scheduled,
-// DateCreated, DateModified, and Tags. Body stores the markdown content after
-// the frontmatter block.
-//
-// Title is a derived convenience value populated from the first markdown H1 in
-// Body when decoding; it is not written as a dedicated top-level field by this
-// package. Extra preserves unknown frontmatter keys so they can round-trip.
-type TaskNote struct {
-	ID string
-
-	// Status maps to the frontmatter "status" value.
-	Status string
-	// Priority maps to the frontmatter "priority" value.
-	Priority string
-	// Scheduled maps to the frontmatter "scheduled" value.
-	Scheduled *time.Time
-	// Due maps to the frontmatter "due" value.
-	Due *time.Time
-	// DateCreated maps to the frontmatter "dateCreated" value.
-	DateCreated *time.Time
-	// DateModified maps to the frontmatter "dateModified" value.
-	DateModified *time.Time
-	// Tags maps to the frontmatter "tags" sequence.
-	Tags []string
-	// Body contains markdown content after the frontmatter block.
-	Body string
-	// Title is derived from the first markdown H1 in Body.
-	Title string
-	// Extra stores unsupported frontmatter fields for round-trip preservation.
-	Extra map[string]any
-}
-
-type frontmatter struct {
-	Status       string   `yaml:"status,omitempty"`
-	Priority     string   `yaml:"priority,omitempty"`
-	Scheduled    string   `yaml:"scheduled,omitempty"`
-	Due          string   `yaml:"due,omitempty"`
-	DateCreated  string   `yaml:"dateCreated,omitempty"`
-	DateModified string   `yaml:"dateModified,omitempty"`
-	Tags         []string `yaml:"tags,omitempty"`
-}
-
 // Decode parses a TaskNotes document (YAML frontmatter + markdown body).
 func Decode(id string, content string) (*TaskNote, error) {
-	note := &TaskNote{Tags: []string{}, Extra: map[string]any{}}
 	content = strings.ReplaceAll(content, "\r\n", "\n")
 
 	fmText, body, hasFrontmatter, err := splitFrontmatter(content)
@@ -103,66 +55,70 @@ func Decode(id string, content string) (*TaskNote, error) {
 		return nil, err
 	}
 
+	note := &TaskNote{
+		Body: stringPtr(body),
+		Frontmatter: TaskFrontmatter{
+			Tags: []string{},
+		},
+	}
+	if id != "" {
+		note.File = &TaskNoteFile{Path: stringPtr(id)}
+	}
+
 	if hasFrontmatter {
-		var fm frontmatter
-		if err := yaml.Unmarshal([]byte(fmText), &fm); err != nil {
+		var raw map[string]any
+		if err := yaml.Unmarshal([]byte(fmText), &raw); err != nil {
 			return nil, fmt.Errorf("parse frontmatter: %w", err)
 		}
 
-		note.Status = fm.Status
-		note.Priority = fm.Priority
-		note.Tags = append(note.Tags, fm.Tags...)
-
-		if fm.Scheduled != "" {
-			t, err := parseWithLayouts(fm.Scheduled, scheduledLayouts)
-			if err != nil {
+		if value := stringField(raw, "status"); value != "" {
+			note.Frontmatter.Status = value
+		}
+		if value := stringField(raw, "priority"); value != "" {
+			note.Frontmatter.Priority = stringPtr(value)
+		}
+		if value := stringField(raw, "title"); value != "" {
+			note.Frontmatter.Title = value
+		}
+		if value := stringField(raw, "scheduled"); value != "" {
+			if _, err := parseWithLayouts(value, scheduledLayouts); err != nil {
 				return nil, fmt.Errorf("parse scheduled: %w", err)
 			}
-
-			t.Round(time.Hour * 24)
-			note.Scheduled = &t
+			scheduled := DateOrDateTime(value)
+			note.Frontmatter.Scheduled = &scheduled
 		}
-
-		if fm.Due != "" {
-			t, err := parseWithLayouts(fm.Due, scheduledLayouts)
-			if err != nil {
+		if value := stringField(raw, "due"); value != "" {
+			if _, err := parseWithLayouts(value, scheduledLayouts); err != nil {
 				return nil, fmt.Errorf("parse due: %w", err)
 			}
-
-			t.Round(time.Hour * 24)
-			note.Due = &t
+			due := DateOrDateTime(value)
+			note.Frontmatter.Due = &due
 		}
-
-		if fm.DateCreated != "" {
-			t, err := parseWithLayouts(fm.DateCreated, dateTimeLayouts)
+		if value := firstStringField(raw, "date_created", "dateCreated"); value != "" {
+			t, err := parseWithLayouts(value, dateTimeLayouts)
 			if err != nil {
 				return nil, fmt.Errorf("parse dateCreated: %w", err)
 			}
-			note.DateCreated = &t
+			note.Frontmatter.DateCreated = t
 		}
-
-		if fm.DateModified != "" {
-			t, err := parseWithLayouts(fm.DateModified, dateTimeLayouts)
+		if value := firstStringField(raw, "date_modified", "dateModified"); value != "" {
+			t, err := parseWithLayouts(value, dateTimeLayouts)
 			if err != nil {
 				return nil, fmt.Errorf("parse dateModified: %w", err)
 			}
-			note.DateModified = &t
+			note.Frontmatter.DateModified = t
+		}
+		if tags, ok := stringSliceField(raw, "tags"); ok {
+			note.Frontmatter.Tags = tags
 		}
 
-		var raw map[string]any
-		if err := yaml.Unmarshal([]byte(fmText), &raw); err != nil {
-			return nil, fmt.Errorf("parse frontmatter map: %w", err)
-		}
-
-		for _, k := range []string{"status", "priority", "scheduled", "due", "dateCreated", "dateModified", "tags"} {
-			delete(raw, k)
-		}
-		note.Extra = raw
+		note.Frontmatter.AdditionalProperties = frontmatterExtra(raw)
 	}
 
-	note.Body = body
-	note.Title = extractFirstH1(body)
-	note.ID = id
+	if note.Frontmatter.Title == "" {
+		note.Frontmatter.Title = extractFirstH1(body)
+	}
+
 	return note, nil
 }
 
@@ -182,9 +138,9 @@ func Encode(note *TaskNote) (string, error) {
 		return "", fmt.Errorf("marshal frontmatter: %w", err)
 	}
 
-	body := note.Body
-	if body == "" && note.Title != "" {
-		body = "# " + note.Title + "\n"
+	body := Body(note)
+	if body == "" && Title(note) != "" {
+		body = "# " + Title(note) + "\n"
 	}
 
 	var b strings.Builder
@@ -195,6 +151,83 @@ func Encode(note *TaskNote) (string, error) {
 		b.WriteString(body)
 	}
 	return b.String(), nil
+}
+
+func ID(note *TaskNote) string {
+	if note == nil || note.File == nil || note.File.Path == nil {
+		return ""
+	}
+
+	return *note.File.Path
+}
+
+func Body(note *TaskNote) string {
+	if note == nil || note.Body == nil {
+		return ""
+	}
+
+	return *note.Body
+}
+
+func Title(note *TaskNote) string {
+	if note == nil {
+		return ""
+	}
+
+	return note.Frontmatter.Title
+}
+
+func Status(note *TaskNote) string {
+	if note == nil {
+		return ""
+	}
+
+	return note.Frontmatter.Status
+}
+
+func Priority(note *TaskNote) string {
+	if note == nil || note.Frontmatter.Priority == nil {
+		return ""
+	}
+
+	return *note.Frontmatter.Priority
+}
+
+func Tags(note *TaskNote) []string {
+	if note == nil {
+		return nil
+	}
+
+	return note.Frontmatter.Tags
+}
+
+func Scheduled(note *TaskNote) *time.Time {
+	if note == nil {
+		return nil
+	}
+
+	return parseDateOrDateTime(note.Frontmatter.Scheduled)
+}
+
+func Due(note *TaskNote) *time.Time {
+	if note == nil {
+		return nil
+	}
+
+	return parseDateOrDateTime(note.Frontmatter.Due)
+}
+
+func parseDateOrDateTime(value *DateOrDateTime) *time.Time {
+	if value == nil {
+		return nil
+	}
+
+	t, err := parseWithLayouts(string(*value), scheduledLayouts)
+	if err != nil {
+		return nil
+	}
+
+	return &t
 }
 
 func splitFrontmatter(content string) (frontmatterText string, body string, hasFrontmatter bool, err error) {
@@ -238,46 +271,53 @@ func buildFrontmatterNode(note *TaskNote) (*yaml.Node, error) {
 		)
 	}
 
-	if note.Status != "" {
-		appendScalar("status", note.Status)
+	fm := note.Frontmatter
+	if fm.Title != "" {
+		appendScalar("title", fm.Title)
 	}
-	if note.Priority != "" {
-		appendScalar("priority", note.Priority)
+	if fm.Status != "" {
+		appendScalar("status", fm.Status)
 	}
-	if note.Scheduled != nil {
-		appendScalar("scheduled", note.Scheduled.Format(dateLayout))
+	if fm.Priority != nil && *fm.Priority != "" {
+		appendScalar("priority", *fm.Priority)
 	}
-	if note.Due != nil {
-		appendScalar("due", note.Due.Format(dateLayout))
+	if fm.Scheduled != nil {
+		appendScalar("scheduled", string(*fm.Scheduled))
 	}
-	if note.DateCreated != nil {
-		appendScalar("dateCreated", note.DateCreated.Format(time.RFC3339Nano))
+	if fm.Due != nil {
+		appendScalar("due", string(*fm.Due))
 	}
-	if note.DateModified != nil {
-		appendScalar("dateModified", note.DateModified.Format(time.RFC3339Nano))
+	if !fm.DateCreated.IsZero() {
+		appendScalar("dateCreated", fm.DateCreated.Format(time.RFC3339Nano))
 	}
-	if len(note.Tags) > 0 {
+	if !fm.DateModified.IsZero() {
+		appendScalar("dateModified", fm.DateModified.Format(time.RFC3339Nano))
+	}
+	if len(fm.Tags) > 0 {
 		mapping.Content = append(mapping.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "tags"},
-			stringSliceNode(note.Tags),
+			stringSliceNode(fm.Tags),
 		)
 	}
 
-	keys := make([]string, 0, len(note.Extra))
-	for k := range note.Extra {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	for _, k := range keys {
-		node, err := anyToYAMLNode(note.Extra[k])
-		if err != nil {
-			return nil, fmt.Errorf("marshal extra field %q: %w", k, err)
+	extra, ok := fm.AdditionalProperties.(map[string]any)
+	if ok {
+		keys := make([]string, 0, len(extra))
+		for k := range extra {
+			keys = append(keys, k)
 		}
-		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k},
-			node,
-		)
+		sort.Strings(keys)
+
+		for _, k := range keys {
+			node, err := anyToYAMLNode(extra[k])
+			if err != nil {
+				return nil, fmt.Errorf("marshal extra field %q: %w", k, err)
+			}
+			mapping.Content = append(mapping.Content,
+				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k},
+				node,
+			)
+		}
 	}
 
 	return mapping, nil
@@ -308,6 +348,80 @@ func anyToYAMLNode(v any) (*yaml.Node, error) {
 	}
 
 	return node.Content[0], nil
+}
+
+func stringPtr(value string) *string {
+	return &value
+}
+
+func stringField(values map[string]any, key string) string {
+	value, ok := values[key]
+	if !ok {
+		return ""
+	}
+
+	if t, ok := value.(time.Time); ok {
+		if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0 {
+			return t.Format(dateLayout)
+		}
+
+		return t.Format(time.RFC3339Nano)
+	}
+
+	return fmt.Sprint(value)
+}
+
+func firstStringField(values map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value := stringField(values, key); value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
+func stringSliceField(values map[string]any, key string) ([]string, bool) {
+	value, ok := values[key]
+	if !ok {
+		return nil, false
+	}
+
+	items, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, fmt.Sprint(item))
+	}
+
+	return result, true
+}
+
+func frontmatterExtra(raw map[string]any) map[string]any {
+	extra := make(map[string]any, len(raw))
+	for k, v := range raw {
+		extra[k] = v
+	}
+
+	for _, k := range []string{
+		"title",
+		"status",
+		"priority",
+		"scheduled",
+		"due",
+		"dateCreated",
+		"dateModified",
+		"date_created",
+		"date_modified",
+		"tags",
+	} {
+		delete(extra, k)
+	}
+
+	return extra
 }
 
 func parseWithLayouts(value string, layouts []string) (time.Time, error) {

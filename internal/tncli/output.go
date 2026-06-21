@@ -116,25 +116,25 @@ func printListTask(stdout io.Writer, note *tnmodel.TaskNote) error {
 		return err
 	}
 
-	if err := printListTaskTags(stdout, note.Tags); err != nil {
+	if err := printListTaskTags(stdout, tnmodel.Tags(note)); err != nil {
 		return err
 	}
 
-	if note.Scheduled != nil {
-		if err := printListTaskScheduled(stdout, *note.Scheduled); err != nil {
+	if scheduled := tnmodel.Scheduled(note); scheduled != nil {
+		if err := printListTaskScheduled(stdout, *scheduled); err != nil {
 			return err
 		}
 	}
 
-	return printListTaskID(stdout, note.ID)
+	return printListTaskID(stdout, tnmodel.ID(note))
 }
 
 func printListTaskTitle(stdout io.Writer, note *tnmodel.TaskNote) error {
 	return printf(
 		stdout,
 		"%s %s\n",
-		color.HiWhiteString("○ %s", note.Title),
-		color.CyanString("[%s]", strings.ToUpper(note.Priority)),
+		color.HiWhiteString("○ %s", tnmodel.Title(note)),
+		color.CyanString("[%s]", strings.ToUpper(tnmodel.Priority(note))),
 	)
 }
 

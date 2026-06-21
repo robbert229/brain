@@ -86,8 +86,8 @@ func TestTaskNotesFixtures_EncodeDecode_RoundTrip(t *testing.T) {
 			reDecoded, err := tnmodel.Decode(taskID, encoded)
 			require.NoError(t, err)
 
-			require.Equal(t, decoded.Status, reDecoded.Status)
-			require.Equal(t, decoded.Priority, reDecoded.Priority)
+			require.Equal(t, tnmodel.Status(decoded), tnmodel.Status(reDecoded))
+			require.Equal(t, tnmodel.Priority(decoded), tnmodel.Priority(reDecoded))
 		})
 	}
 }

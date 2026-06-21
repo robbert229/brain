@@ -80,12 +80,13 @@ func (repo DiskTaskNoteRepository) Crawl(ctx context.Context, fn func(*tnmodel.T
 }
 
 func CoincidenceDetector(ctx context.Context, note *tnmodel.TaskNote) (bool, error) {
-	if len(note.Tags) == 0 {
+	tags := tnmodel.Tags(note)
+	if len(tags) == 0 {
 		return false, nil
 	}
 
 	var foundTask bool
-	for _, tag := range note.Tags {
+	for _, tag := range tags {
 		if tag == "task" {
 			foundTask = true
 			break

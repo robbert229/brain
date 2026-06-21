@@ -310,12 +310,12 @@ func (j *TaskFrontmatter) UnmarshalJSON(value []byte) error {
 	return nil
 }
 
-type TasknoteSchemaJson struct {
+type TaskNote struct {
 	// Freeform markdown body. Non-normative for task semantics.
 	Body *string `json:"body,omitempty,omitzero" yaml:"body,omitempty" mapstructure:"body,omitempty"`
 
 	// File corresponds to the JSON schema field "file".
-	File *TasknoteSchemaJsonFile `json:"file,omitempty,omitzero" yaml:"file,omitempty" mapstructure:"file,omitempty"`
+	File *TaskNoteFile `json:"file,omitempty,omitzero" yaml:"file,omitempty" mapstructure:"file,omitempty"`
 
 	// Frontmatter corresponds to the JSON schema field "frontmatter".
 	Frontmatter TaskFrontmatter `json:"frontmatter" yaml:"frontmatter" mapstructure:"frontmatter"`
@@ -323,7 +323,7 @@ type TasknoteSchemaJson struct {
 	AdditionalProperties interface{} `mapstructure:",remain"`
 }
 
-type TasknoteSchemaJsonFile struct {
+type TaskNoteFile struct {
 	// Created corresponds to the JSON schema field "created".
 	Created *time.Time `json:"created,omitempty,omitzero" yaml:"created,omitempty" mapstructure:"created,omitempty"`
 
@@ -337,15 +337,15 @@ type TasknoteSchemaJsonFile struct {
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (j *TasknoteSchemaJson) UnmarshalJSON(value []byte) error {
+func (j *TaskNote) UnmarshalJSON(value []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(value, &raw); err != nil {
 		return err
 	}
 	if _, ok := raw["frontmatter"]; raw != nil && !ok {
-		return fmt.Errorf("field frontmatter in TasknoteSchemaJson: required")
+		return fmt.Errorf("field frontmatter in TaskNote: required")
 	}
-	type Plain TasknoteSchemaJson
+	type Plain TaskNote
 	var plain Plain
 	if err := json.Unmarshal(value, &plain); err != nil {
 		return err
@@ -358,7 +358,7 @@ func (j *TasknoteSchemaJson) UnmarshalJSON(value []byte) error {
 	if err := mapstructure.Decode(raw, &plain.AdditionalProperties); err != nil {
 		return err
 	}
-	*j = TasknoteSchemaJson(plain)
+	*j = TaskNote(plain)
 	return nil
 }
 

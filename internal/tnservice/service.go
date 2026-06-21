@@ -60,7 +60,7 @@ func (service TaskNoteService) List(ctx context.Context, req ListRequest) (ListR
 	}
 
 	sort.Slice(notes, func(i, j int) bool {
-		return notes[i].ID < notes[j].ID
+		return tnmodel.ID(notes[i]) < tnmodel.ID(notes[j])
 	})
 
 	foundCount := len(notes)
@@ -95,19 +95,20 @@ func limitTaskNotes(notes []*tnmodel.TaskNote, limit int) []*tnmodel.TaskNote {
 }
 
 func isTaskToday(note *tnmodel.TaskNote, now time.Time) bool {
-	return sameDate(note.Due, now) || sameDate(note.Scheduled, now)
+	return sameDate(tnmodel.Due(note), now) || sameDate(tnmodel.Scheduled(note), now)
 }
 
 func isTaskOverdue(note *tnmodel.TaskNote, now time.Time) bool {
-	if note.Due == nil || isTaskCompleted(note) {
+	due := tnmodel.Due(note)
+	if due == nil || isTaskCompleted(note) {
 		return false
 	}
 
-	return compareDate(note.Due, now) < 0
+	return compareDate(due, now) < 0
 }
 
 func isTaskCompleted(note *tnmodel.TaskNote) bool {
-	switch strings.ToLower(strings.TrimSpace(note.Status)) {
+	switch strings.ToLower(strings.TrimSpace(tnmodel.Status(note))) {
 	case tnmodel.StatusClosed, tnmodel.StatusCompleted, tnmodel.StatusDone:
 		return true
 	default:

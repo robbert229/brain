@@ -58,9 +58,9 @@ Second task description.`
 	// Find tasks by title since order may vary
 	var task1, task2 *tnmodel.TaskNote
 	for _, note := range notes {
-		if note.Title == "Task One" {
+		if tnmodel.Title(note) == "Task One" {
 			task1 = note
-		} else if note.Title == "Task Two" {
+		} else if tnmodel.Title(note) == "Task Two" {
 			task2 = note
 		}
 	}
@@ -69,14 +69,14 @@ Second task description.`
 	require.NotNil(t, task2)
 
 	// Check first task
-	require.Equal(t, "open", task1.Status)
-	require.Equal(t, "high", task1.Priority)
-	require.Len(t, task1.Tags, 1)
-	require.Equal(t, "task", task1.Tags[0])
+	require.Equal(t, "open", tnmodel.Status(task1))
+	require.Equal(t, "high", tnmodel.Priority(task1))
+	require.Len(t, tnmodel.Tags(task1), 1)
+	require.Equal(t, "task", tnmodel.Tags(task1)[0])
 
 	// Check second task
-	require.Equal(t, "completed", task2.Status)
-	require.Equal(t, "low", task2.Priority)
+	require.Equal(t, "completed", tnmodel.Status(task2))
+	require.Equal(t, "low", tnmodel.Priority(task2))
 }
 
 func TestDiskTaskNoteRepository_Crawl_DirectoryNotFound(t *testing.T) {

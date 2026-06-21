@@ -30,11 +30,13 @@ func TestList_UsesProvidedRepository(t *testing.T) {
 	service := NewTaskNoteService(stubTaskNoteRepository{
 		notes: []*tnmodel.TaskNote{
 			{
-				ID:       "from-repository.md",
-				Title:    "From repository",
-				Status:   "open",
-				Priority: "normal",
-				Tags:     []string{"task"},
+				File: &tnmodel.TaskNoteFile{Path: stringPtr("from-repository.md")},
+				Frontmatter: tnmodel.TaskFrontmatter{
+					Title:    "From repository",
+					Status:   "open",
+					Priority: stringPtr("normal"),
+					Tags:     []string{"task"},
+				},
 			},
 		},
 	})
@@ -44,8 +46,8 @@ func TestList_UsesProvidedRepository(t *testing.T) {
 
 	require.Equal(t, 1, result.FoundCount)
 	require.Len(t, result.Notes, 1)
-	require.Equal(t, "From repository", result.Notes[0].Title)
-	require.Equal(t, "from-repository.md", result.Notes[0].ID)
+	require.Equal(t, "From repository", tnmodel.Title(result.Notes[0]))
+	require.Equal(t, "from-repository.md", tnmodel.ID(result.Notes[0]))
 }
 
 func TestList_TodayFilter(t *testing.T) {
@@ -79,7 +81,7 @@ tags:
 
 	require.Equal(t, 1, result.FoundCount)
 	require.Len(t, result.Notes, 1)
-	require.Equal(t, "Today task", result.Notes[0].Title)
+	require.Equal(t, "Today task", tnmodel.Title(result.Notes[0]))
 }
 
 func TestList_OverdueFilter(t *testing.T) {
@@ -122,7 +124,7 @@ tags:
 
 	require.Equal(t, 1, result.FoundCount)
 	require.Len(t, result.Notes, 1)
-	require.Equal(t, "Overdue task", result.Notes[0].Title)
+	require.Equal(t, "Overdue task", tnmodel.Title(result.Notes[0]))
 }
 
 func TestList_CompletedFilter(t *testing.T) {
@@ -154,7 +156,7 @@ tags:
 
 	require.Equal(t, 1, result.FoundCount)
 	require.Len(t, result.Notes, 1)
-	require.Equal(t, "Done task", result.Notes[0].Title)
+	require.Equal(t, "Done task", tnmodel.Title(result.Notes[0]))
 }
 
 func TestList_Limit(t *testing.T) {
@@ -193,8 +195,12 @@ tags:
 
 	require.Equal(t, 3, result.FoundCount)
 	require.Len(t, result.Notes, 2)
-	require.Equal(t, "First task", result.Notes[0].Title)
-	require.Equal(t, "Second task", result.Notes[1].Title)
+	require.Equal(t, "First task", tnmodel.Title(result.Notes[0]))
+	require.Equal(t, "Second task", tnmodel.Title(result.Notes[1]))
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 func writeTaskNote(t *testing.T, root string, name string, content string) {
