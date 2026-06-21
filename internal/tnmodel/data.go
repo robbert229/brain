@@ -2,7 +2,6 @@ package tnmodel
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -71,48 +70,20 @@ func Decode(id string, content string) (*TaskNote, error) {
 			return nil, fmt.Errorf("parse frontmatter: %w", err)
 		}
 
-		if value := stringField(raw, "status"); value != "" {
-			note.Frontmatter.Status = value
-		}
-		if value := stringField(raw, "priority"); value != "" {
-			note.Frontmatter.Priority = stringPtr(value)
-		}
-		if value := stringField(raw, "title"); value != "" {
-			note.Frontmatter.Title = value
-		}
-		if value := stringField(raw, "scheduled"); value != "" {
-			if _, err := parseWithLayouts(value, scheduledLayouts); err != nil {
-				return nil, fmt.Errorf("parse scheduled: %w", err)
-			}
-			scheduled := DateOrDateTime(value)
-			note.Frontmatter.Scheduled = &scheduled
-		}
-		if value := stringField(raw, "due"); value != "" {
-			if _, err := parseWithLayouts(value, scheduledLayouts); err != nil {
-				return nil, fmt.Errorf("parse due: %w", err)
-			}
-			due := DateOrDateTime(value)
-			note.Frontmatter.Due = &due
-		}
-		if value := firstStringField(raw, "date_created", "dateCreated"); value != "" {
-			t, err := parseWithLayouts(value, dateTimeLayouts)
-			if err != nil {
-				return nil, fmt.Errorf("parse dateCreated: %w", err)
-			}
-			note.Frontmatter.DateCreated = t
-		}
-		if value := firstStringField(raw, "date_modified", "dateModified"); value != "" {
-			t, err := parseWithLayouts(value, dateTimeLayouts)
-			if err != nil {
-				return nil, fmt.Errorf("parse dateModified: %w", err)
-			}
-			note.Frontmatter.DateModified = t
-		}
-		if tags, ok := stringSliceField(raw, "tags"); ok {
-			note.Frontmatter.Tags = tags
+		normalized := normalizeFrontmatterFields(raw)
+		fmBytes, err := yaml.Marshal(normalized)
+		if err != nil {
+			return nil, fmt.Errorf("marshal normalized frontmatter: %w", err)
 		}
 
-		note.Frontmatter.AdditionalProperties = frontmatterExtra(raw)
+		if err := yaml.Unmarshal(fmBytes, &note.Frontmatter); err != nil {
+			return nil, fmt.Errorf("parse frontmatter: %w", err)
+		}
+		if err := validateFrontmatterDates(note.Frontmatter); err != nil {
+			return nil, err
+		}
+
+		note.Frontmatter.AdditionalProperties = frontmatterExtra(normalized)
 	}
 
 	if note.Frontmatter.Title == "" {
@@ -128,12 +99,12 @@ func Encode(note *TaskNote) (string, error) {
 		return "", nil
 	}
 
-	fmNode, err := buildFrontmatterNode(note)
+	fm, err := frontmatterMap(note.Frontmatter)
 	if err != nil {
 		return "", err
 	}
 
-	fmBytes, err := yaml.Marshal(fmNode)
+	fmBytes, err := yaml.Marshal(fm)
 	if err != nil {
 		return "", fmt.Errorf("marshal frontmatter: %w", err)
 	}
@@ -261,143 +232,30 @@ func extractFirstH1(body string) string {
 	return ""
 }
 
-func buildFrontmatterNode(note *TaskNote) (*yaml.Node, error) {
-	mapping := &yaml.Node{Kind: yaml.MappingNode}
+func frontmatterMap(fm TaskFrontmatter) (map[string]any, error) {
+	extra, _ := fm.AdditionalProperties.(map[string]any)
+	fm.AdditionalProperties = nil
 
-	appendScalar := func(k, v string) {
-		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k},
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v},
-		)
-	}
-
-	fm := note.Frontmatter
-	if fm.Title != "" {
-		appendScalar("title", fm.Title)
-	}
-	if fm.Status != "" {
-		appendScalar("status", fm.Status)
-	}
-	if fm.Priority != nil && *fm.Priority != "" {
-		appendScalar("priority", *fm.Priority)
-	}
-	if fm.Scheduled != nil {
-		appendScalar("scheduled", string(*fm.Scheduled))
-	}
-	if fm.Due != nil {
-		appendScalar("due", string(*fm.Due))
-	}
-	if !fm.DateCreated.IsZero() {
-		appendScalar("dateCreated", fm.DateCreated.Format(time.RFC3339Nano))
-	}
-	if !fm.DateModified.IsZero() {
-		appendScalar("dateModified", fm.DateModified.Format(time.RFC3339Nano))
-	}
-	if len(fm.Tags) > 0 {
-		mapping.Content = append(mapping.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "tags"},
-			stringSliceNode(fm.Tags),
-		)
-	}
-
-	extra, ok := fm.AdditionalProperties.(map[string]any)
-	if ok {
-		keys := make([]string, 0, len(extra))
-		for k := range extra {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		for _, k := range keys {
-			node, err := anyToYAMLNode(extra[k])
-			if err != nil {
-				return nil, fmt.Errorf("marshal extra field %q: %w", k, err)
-			}
-			mapping.Content = append(mapping.Content,
-				&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: k},
-				node,
-			)
-		}
-	}
-
-	return mapping, nil
-}
-
-func stringSliceNode(values []string) *yaml.Node {
-	n := &yaml.Node{Kind: yaml.SequenceNode}
-	for _, v := range values {
-		n.Content = append(n.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v})
-	}
-
-	return n
-}
-
-func anyToYAMLNode(v any) (*yaml.Node, error) {
-	b, err := yaml.Marshal(v)
+	b, err := yaml.Marshal(fm)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("marshal frontmatter: %w", err)
 	}
 
-	var node yaml.Node
-	if err := yaml.Unmarshal(b, &node); err != nil {
-		return nil, err
+	var fields map[string]any
+	if err := yaml.Unmarshal(b, &fields); err != nil {
+		return nil, fmt.Errorf("parse generated frontmatter: %w", err)
 	}
 
-	if len(node.Content) == 0 {
-		return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!null", Value: "null"}, nil
+	deleteEmptyGeneratedFields(fields, fm)
+	for k, v := range extra {
+		fields[k] = v
 	}
 
-	return node.Content[0], nil
+	return fields, nil
 }
 
 func stringPtr(value string) *string {
 	return &value
-}
-
-func stringField(values map[string]any, key string) string {
-	value, ok := values[key]
-	if !ok {
-		return ""
-	}
-
-	if t, ok := value.(time.Time); ok {
-		if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0 {
-			return t.Format(dateLayout)
-		}
-
-		return t.Format(time.RFC3339Nano)
-	}
-
-	return fmt.Sprint(value)
-}
-
-func firstStringField(values map[string]any, keys ...string) string {
-	for _, key := range keys {
-		if value := stringField(values, key); value != "" {
-			return value
-		}
-	}
-
-	return ""
-}
-
-func stringSliceField(values map[string]any, key string) ([]string, bool) {
-	value, ok := values[key]
-	if !ok {
-		return nil, false
-	}
-
-	items, ok := value.([]any)
-	if !ok {
-		return nil, false
-	}
-
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		result = append(result, fmt.Sprint(item))
-	}
-
-	return result, true
 }
 
 func frontmatterExtra(raw map[string]any) map[string]any {
@@ -422,6 +280,73 @@ func frontmatterExtra(raw map[string]any) map[string]any {
 	}
 
 	return extra
+}
+
+func normalizeFrontmatterFields(raw map[string]any) map[string]any {
+	normalized := make(map[string]any, len(raw))
+	for k, v := range raw {
+		normalized[k] = normalizeYAMLScalar(v)
+	}
+
+	copyLegacyField(normalized, "dateCreated", "date_created")
+	copyLegacyField(normalized, "dateModified", "date_modified")
+	return normalized
+}
+
+func copyLegacyField(values map[string]any, legacy string, canonical string) {
+	if _, ok := values[canonical]; ok {
+		delete(values, legacy)
+		return
+	}
+
+	if value, ok := values[legacy]; ok {
+		values[canonical] = value
+		delete(values, legacy)
+	}
+}
+
+func normalizeYAMLScalar(value any) any {
+	t, ok := value.(time.Time)
+	if !ok {
+		return value
+	}
+
+	if t.Hour() == 0 && t.Minute() == 0 && t.Second() == 0 && t.Nanosecond() == 0 {
+		return t.Format(dateLayout)
+	}
+
+	return t.Format(time.RFC3339Nano)
+}
+
+func validateFrontmatterDates(fm TaskFrontmatter) error {
+	if fm.Scheduled != nil {
+		if _, err := parseWithLayouts(string(*fm.Scheduled), scheduledLayouts); err != nil {
+			return fmt.Errorf("parse scheduled: %w", err)
+		}
+	}
+	if fm.Due != nil {
+		if _, err := parseWithLayouts(string(*fm.Due), scheduledLayouts); err != nil {
+			return fmt.Errorf("parse due: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func deleteEmptyGeneratedFields(fields map[string]any, fm TaskFrontmatter) {
+	delete(fields, "additionalproperties")
+	if fm.Title == "" {
+		delete(fields, "title")
+	}
+	if fm.Status == "" {
+		delete(fields, "status")
+	}
+	if fm.DateCreated.IsZero() {
+		delete(fields, "date_created")
+	}
+	if fm.DateModified.IsZero() {
+		delete(fields, "date_modified")
+	}
 }
 
 func parseWithLayouts(value string, layouts []string) (time.Time, error) {

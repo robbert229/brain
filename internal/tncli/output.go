@@ -1,6 +1,7 @@
 package tncli
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -63,6 +64,10 @@ func printStubSearch(stdout io.Writer, query string) error {
 }
 
 func PrintList(stdout io.Writer, req tnservice.ListRequest, result tnservice.ListResult) error {
+	if req.JSON {
+		return printListJSON(stdout, req, result)
+	}
+
 	err := printListHeader(stdout, req, result.FoundCount)
 	if err != nil {
 		return fmt.Errorf("failed to print list header: %w", err)
@@ -74,6 +79,41 @@ func PrintList(stdout io.Writer, req tnservice.ListRequest, result tnservice.Lis
 	}
 
 	return nil
+}
+
+func printListJSON(stdout io.Writer, req tnservice.ListRequest, result tnservice.ListResult) error {
+	type metaResult struct {
+		Filter    any  `json:"filter"`
+		Today     bool `json:"today"`
+		Overdue   bool `json:"overdue"`
+		Completed bool `json:"completed"`
+		Limit     int  `json:"limit"`
+	}
+
+	type dataResult struct {
+		Tasks []*tnmodel.TaskNote `json:"tasks"`
+	}
+
+	type jsonResult struct {
+		Meta    metaResult `json:"meta"`
+		Success bool       `json:"success"`
+		Data    dataResult `json:"data"`
+	}
+
+	enc := json.NewEncoder(stdout)
+	return enc.Encode(jsonResult{
+		Success: true,
+		Data: dataResult{
+			Tasks: result.Notes,
+		},
+		Meta: metaResult{
+			Filter:    nil,
+			Today:     req.Today,
+			Overdue:   req.Overdue,
+			Completed: req.Completed,
+			Limit:     req.Limit,
+		},
+	})
 }
 
 func printListHeader(stdout io.Writer, req tnservice.ListRequest, foundCount int) error {

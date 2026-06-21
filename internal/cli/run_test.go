@@ -90,7 +90,7 @@ func TestRun_TNListFlags(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 
-	exitCode := run([]string{"tn", "list", "--today", "--overdue", "--completed", "--filter", "priority:urgent AND tags:work", "--json", "--limit", "10"}, &out, &errOut)
+	exitCode := run([]string{"tn", "list", "--today", "--overdue", "--completed", "--filter", "priority:urgent AND tags:work", "--limit", "10"}, &out, &errOut)
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d", exitCode)
 	}
