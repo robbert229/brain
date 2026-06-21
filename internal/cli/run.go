@@ -5,7 +5,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/robbert229/brain/internal/cli/tncli"
+	"github.com/robbert229/brain/internal/tncli"
 	"github.com/spf13/cobra"
 )
 
@@ -46,6 +46,3 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	return 0
 }
-
-
-
