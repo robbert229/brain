@@ -2,6 +2,7 @@ package tnnlpcore
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,5 +173,137 @@ func TestRecurrenceEstimatePreviewAndRelativeDates(t *testing.T) {
 	preview := parser.GetPreviewText(result)
 	if preview == "" {
 		t.Fatal("expected preview text")
+	}
+}
+
+func TestUserFieldTypes(t *testing.T) {
+	triggers := NLPTriggersConfig{Triggers: []PropertyTriggerConfig{
+		{PropertyID: "labels", Trigger: "label:", Enabled: true},
+		{PropertyID: "flagged", Trigger: "flagged:", Enabled: true},
+		{PropertyID: "review", Trigger: "review:", Enabled: true},
+		{PropertyID: "points", Trigger: "points:", Enabled: true},
+	}}
+	parser := testParser(func(o *parserTestOptions) {
+		o.triggers = &triggers
+		o.userFields = []UserMappedField{
+			{ID: "labels", DisplayName: "Labels", Key: "labels", Type: "list"},
+			{ID: "flagged", DisplayName: "Flagged", Key: "flagged", Type: "boolean"},
+			{ID: "review", DisplayName: "Review", Key: "review", Type: "date"},
+			{ID: "points", DisplayName: "Points", Key: "points", Type: "number"},
+		}
+	})
+
+	result := parser.ParseInput(`Ship task label:frontend label:"needs review" flagged:false review:2026-07-01 points:8`)
+	if result.Title != "Ship task" {
+		t.Fatalf("title = %q", result.Title)
+	}
+	if !reflect.DeepEqual(result.UserFields["labels"], []string{"frontend", "needs review"}) {
+		t.Fatalf("labels = %#v", result.UserFields["labels"])
+	}
+	for key, want := range map[string]string{"flagged": "false", "review": "2026-07-01", "points": "8"} {
+		if result.UserFields[key] != want {
+			t.Fatalf("%s = %#v, want %q", key, result.UserFields[key], want)
+		}
+	}
+}
+
+func TestRecurrenceVariants(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+		title string
+	}{
+		{"Pay rent every 3 months", "FREQ=MONTHLY;INTERVAL=3", "Pay rent"},
+		{"Water plants every other week", "FREQ=WEEKLY;INTERVAL=2", "Water plants"},
+		{"Team sync fridays", "FREQ=WEEKLY;BYDAY=FR", "Team sync"},
+		{"Backup weekly", "FREQ=WEEKLY", "Backup"},
+	}
+	parser := testParser()
+	for _, tc := range cases {
+		result := parser.ParseInput(tc.input)
+		if result.Recurrence != tc.want || result.Title != tc.title {
+			t.Fatalf("%q parsed as %#v", tc.input, result)
+		}
+	}
+}
+
+func TestImplicitDateTimesAndMonthNames(t *testing.T) {
+	now := time.Date(2026, 6, 21, 9, 0, 0, 0, time.Local)
+	parser := testParser(func(o *parserTestOptions) {
+		o.defaultToScheduled = true
+		o.parserOptions.Now = func() time.Time { return now }
+	})
+
+	tuesday := parser.ParseInput("Call Alex tuesday 9:30am")
+	if tuesday.Title != "Call Alex" || tuesday.ScheduledDate != "2026-06-23" || tuesday.ScheduledTime != "09:30" {
+		t.Fatalf("weekday parsed as %#v", tuesday)
+	}
+
+	monthName := parser.ParseInput("Plan launch Jul 4, 2026")
+	if monthName.Title != "Plan launch" || monthName.ScheduledDate != "2026-07-04" {
+		t.Fatalf("month name parsed as %#v", monthName)
+	}
+}
+
+func TestDisabledAndCustomCollectionTriggers(t *testing.T) {
+	triggers := NLPTriggersConfig{Triggers: []PropertyTriggerConfig{
+		{PropertyID: "tags", Trigger: "::", Enabled: true},
+		{PropertyID: "contexts", Trigger: "@", Enabled: false},
+		{PropertyID: "projects", Trigger: "proj:", Enabled: true},
+	}}
+	parser := testParser(func(o *parserTestOptions) { o.triggers = &triggers })
+
+	result := parser.ParseInput("Build ::go @office proj:brain #ignored")
+	if result.Title != "Build @office #ignored" {
+		t.Fatalf("title = %q", result.Title)
+	}
+	if !reflect.DeepEqual(result.Tags, []string{"go"}) {
+		t.Fatalf("tags = %#v", result.Tags)
+	}
+	if len(result.Contexts) != 0 {
+		t.Fatalf("contexts = %#v", result.Contexts)
+	}
+	if !reflect.DeepEqual(result.Projects, []string{"brain"}) {
+		t.Fatalf("projects = %#v", result.Projects)
+	}
+}
+
+func TestStatusSuggestionsAndPreviewDetails(t *testing.T) {
+	parser := testParser(func(o *parserTestOptions) {
+		o.statuses = []StatusConfig{
+			{ID: "todo", Value: "todo", Label: "To Do"},
+			{ID: "done", Value: "done", Label: "Done"},
+			{ID: "blocked", Value: "blocked", Label: "Blocked"},
+		}
+	})
+
+	suggestions := parser.GetStatusSuggestions("do", 2)
+	if len(suggestions) != 2 || suggestions[0]["value"] != "todo" || suggestions[1]["value"] != "done" {
+		t.Fatalf("suggestions = %#v", suggestions)
+	}
+
+	parsed := ParsedTaskData{
+		Title:         "Draft plan",
+		Details:       "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
+		DueDate:       "2026-07-01",
+		DueTime:       "14:05",
+		Priority:      "high",
+		Status:        "todo",
+		Tags:          []string{"work"},
+		Contexts:      []string{"office"},
+		Projects:      []string{"brain"},
+		Recurrence:    "FREQ=WEEKLY",
+		Estimate:      45,
+		UserFields:    map[string]any{"owner": "Jane"},
+		ScheduledDate: "2026-06-30",
+	}
+	preview := parser.GetPreviewText(parsed)
+	for _, want := range []string{`"Draft plan"`, "Due: 2026-07-01 at 14:05", "Scheduled: 2026-06-30", "Priority: high", "Status: todo", "Contexts: @office", "Projects: +brain", "Tags: #work", "Recurrence: every week", "Estimate: 45 min", "owner: Jane"} {
+		if !strings.Contains(preview, want) {
+			t.Fatalf("preview %q missing %q", preview, want)
+		}
+	}
+	if !strings.Contains(preview, "Details: \"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwx...\"") {
+		t.Fatalf("preview details not truncated as expected: %q", preview)
 	}
 }
