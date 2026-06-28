@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/atombender/go-jsonschema v0.23.1
 	github.com/fatih/color v1.19.0
+	github.com/go-kit/kit v0.13.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1

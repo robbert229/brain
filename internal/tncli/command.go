@@ -1,25 +1,28 @@
 package tncli
 
 import (
+	"fmt"
 	"io"
 	"os"
 
+	"github.com/go-kit/kit/endpoint"
 	"github.com/robbert229/brain/internal/tnservice"
 	"github.com/robbert229/brain/internal/tnstorage"
 	"github.com/spf13/cobra"
 )
 
-type taskNoteServiceFactory func() (tnservice.TaskNoteService, error)
+type listEndpointFactory func() (endpoint.Endpoint, error)
 
 // NewCommand creates the tn command and all related subcommands.
 func NewCommand(stdout io.Writer) *cobra.Command {
-	newService := func() (tnservice.TaskNoteService, error) {
+	newListEndpoint := func() (endpoint.Endpoint, error) {
 		wd, err := os.Getwd()
 		if err != nil {
-			return tnservice.TaskNoteService{}, err
+			return nil, err
 		}
 
-		return tnservice.NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(wd)), nil
+		service := tnservice.NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(wd))
+		return tnservice.NewTaskNoteEndpoints(service).List, nil
 	}
 
 	tnCmd := &cobra.Command{
@@ -36,7 +39,7 @@ func NewCommand(stdout io.Writer) *cobra.Command {
 	}
 
 	tnCmd.AddCommand(
-		newListCommand(stdout, newService),
+		newListCommand(stdout, newListEndpoint),
 		newCompleteCommand(stdout),
 		newToggleCommand(stdout),
 		newArchiveCommand(stdout),
@@ -47,7 +50,7 @@ func NewCommand(stdout io.Writer) *cobra.Command {
 	return tnCmd
 }
 
-func newListCommand(stdout io.Writer, newService taskNoteServiceFactory) *cobra.Command {
+func newListCommand(stdout io.Writer, newListEndpoint listEndpointFactory) *cobra.Command {
 	var req tnservice.ListRequest
 
 	cmd := &cobra.Command{
@@ -55,14 +58,19 @@ func newListCommand(stdout io.Writer, newService taskNoteServiceFactory) *cobra.
 		Short: "List tasks",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			service, err := newService()
+			listEndpoint, err := newListEndpoint()
 			if err != nil {
 				return err
 			}
 
-			result, err := service.List(cmd.Context(), req)
+			response, err := listEndpoint(cmd.Context(), req)
 			if err != nil {
 				return err
+			}
+
+			result, ok := response.(tnservice.ListResult)
+			if !ok {
+				return fmt.Errorf("expected %T, got %T", tnservice.ListResult{}, response)
 			}
 
 			return PrintList(stdout, req, result)
