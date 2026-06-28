@@ -7,7 +7,7 @@ import (
 	"github.com/go-kit/kit/endpoint"
 )
 
-// Endpoints collects the go-kit endpoints exposed by the TaskNotes service.
+// Endpoints collect the go-kit endpoints exposed by the TaskNotes service.
 type Endpoints struct {
 	List endpoint.Endpoint
 }

@@ -1,6 +1,7 @@
 package tncli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,18 +12,33 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type listEndpointFactory func() (endpoint.Endpoint, error)
+type endpointFactory func() (endpoint.Endpoint, error)
 
-// NewCommand creates the tn command and all related subcommands.
-func NewCommand(stdout io.Writer) *cobra.Command {
-	newListEndpoint := func() (endpoint.Endpoint, error) {
-		wd, err := os.Getwd()
+type endpointSetFactory func() (tnservice.Endpoints, error)
+
+var ErrNotImplemented = errors.New("not implemented")
+
+func endpointAdapter(factory endpointSetFactory, selector func(endpoints tnservice.Endpoints) endpoint.Endpoint) endpointFactory {
+	return func() (endpoint.Endpoint, error) {
+		set, err := factory()
 		if err != nil {
 			return nil, err
 		}
 
+		return selector(set), nil
+	}
+}
+
+// NewCommand creates the tn command and all related subcommands.
+func NewCommand(stdout io.Writer) *cobra.Command {
+	endpointSetFactory := func() (tnservice.Endpoints, error) {
+		wd, err := os.Getwd()
+		if err != nil {
+			return tnservice.Endpoints{}, err
+		}
+
 		service := tnservice.NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(wd))
-		return tnservice.NewTaskNoteEndpoints(service).List, nil
+		return tnservice.NewTaskNoteEndpoints(service), nil
 	}
 
 	tnCmd := &cobra.Command{
@@ -31,15 +47,15 @@ func NewCommand(stdout io.Writer) *cobra.Command {
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return printStubInteractiveMode(stdout)
+				return notImplemented("tn interactive")
 			}
 
-			return printStubCreate(stdout, args)
+			return notImplemented("tn create")
 		},
 	}
 
 	tnCmd.AddCommand(
-		newListCommand(stdout, newListEndpoint),
+		newListCommand(stdout, endpointAdapter(endpointSetFactory, func(endpoints tnservice.Endpoints) endpoint.Endpoint { return endpoints.List })),
 		newCompleteCommand(stdout),
 		newToggleCommand(stdout),
 		newArchiveCommand(stdout),
@@ -50,7 +66,7 @@ func NewCommand(stdout io.Writer) *cobra.Command {
 	return tnCmd
 }
 
-func newListCommand(stdout io.Writer, newListEndpoint listEndpointFactory) *cobra.Command {
+func newListCommand(stdout io.Writer, factory endpointFactory) *cobra.Command {
 	var req tnservice.ListRequest
 
 	cmd := &cobra.Command{
@@ -58,7 +74,7 @@ func newListCommand(stdout io.Writer, newListEndpoint listEndpointFactory) *cobr
 		Short: "List tasks",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			listEndpoint, err := newListEndpoint()
+			listEndpoint, err := factory()
 			if err != nil {
 				return err
 			}
@@ -92,7 +108,7 @@ func newCompleteCommand(stdout io.Writer) *cobra.Command {
 		Short: "Mark a task complete",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return printStubComplete(stdout, args[0])
+			return notImplemented("tn complete")
 		},
 	}
 }
@@ -103,7 +119,7 @@ func newToggleCommand(stdout io.Writer) *cobra.Command {
 		Short: "Toggle task completion",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return printStubToggle(stdout, args[0])
+			return notImplemented("tn toggle")
 		},
 	}
 }
@@ -114,7 +130,7 @@ func newArchiveCommand(stdout io.Writer) *cobra.Command {
 		Short: "Archive a task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return printStubArchive(stdout, args[0])
+			return notImplemented("tn archive")
 		},
 	}
 }
@@ -127,7 +143,7 @@ func newDeleteCommand(stdout io.Writer) *cobra.Command {
 		Short: "Delete a task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return printStubDelete(stdout, args[0], force)
+			return notImplemented("tn delete")
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "delete without confirmation")
@@ -151,17 +167,7 @@ func newUpdateCommand(stdout io.Writer) *cobra.Command {
 		Short: "Update a task",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return printStubUpdate(
-				stdout,
-				args[0],
-				status,
-				priority,
-				due,
-				addTags,
-				removeTags,
-				addContexts,
-				addProjects,
-			)
+			return notImplemented("tn update")
 		},
 	}
 	cmd.Flags().StringVar(&status, "status", "", "new status")
@@ -181,7 +187,11 @@ func newSearchCommand(stdout io.Writer) *cobra.Command {
 		Short: "Search tasks",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			return printStubSearch(stdout, args[0])
+			return notImplemented("tn search")
 		},
 	}
+}
+
+func notImplemented(command string) error {
+	return fmt.Errorf("%s: %w", command, ErrNotImplemented)
 }

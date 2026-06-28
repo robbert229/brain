@@ -1,4 +1,4 @@
-package tnservice_test
+package tncli_test
 
 import (
 	"bytes"

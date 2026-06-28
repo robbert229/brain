@@ -52,6 +52,26 @@ scheduled: 2025-12-30T09:00
 	require.Equal(t, "2025-12-30T09:00", Scheduled(note).Format("2006-01-02T15:04"))
 }
 
+func TestDecode_BaseTemplateFrontmatterParses(t *testing.T) {
+	input := `---
+title: Default Base Templates
+description: Default base file templates for TaskNotes views
+dateModified: 2026-05-17T21:57:48+1000
+---
+
+# Default Base Templates
+`
+
+	note, err := Decode("TaskNotes/Views/default.base", input)
+	require.NoError(t, err)
+	require.Equal(t, "Default Base Templates", Title(note))
+	require.False(t, note.Frontmatter.DateModified.IsZero())
+	require.Equal(t, "# Default Base Templates", strings.TrimSpace(Body(note)))
+
+	extra := note.Frontmatter.AdditionalProperties.(map[string]any)
+	require.Equal(t, "Default base file templates for TaskNotes views", extra["description"])
+}
+
 func TestDecode_WithoutFrontmatter(t *testing.T) {
 	input := "# Heading only\n"
 	note, err := Decode("TaskNotes/Tasks/Test.md", input)

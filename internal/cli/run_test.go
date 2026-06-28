@@ -63,13 +63,7 @@ func TestRun_TNSubcommand(t *testing.T) {
 	var errOut bytes.Buffer
 
 	exitCode := run([]string{"tn"}, &out, &errOut)
-	if exitCode != 0 {
-		t.Fatalf("expected exit code 0, got %d", exitCode)
-	}
-
-	if got := strings.TrimSpace(out.String()); got != "[stub] tn interactive mode" {
-		t.Fatalf("unexpected tn output: %q", got)
-	}
+	requireNotImplemented(t, exitCode, out.String(), errOut.String())
 }
 
 func TestRun_TNCreateFromNaturalLanguage(t *testing.T) {
@@ -77,13 +71,7 @@ func TestRun_TNCreateFromNaturalLanguage(t *testing.T) {
 	var errOut bytes.Buffer
 
 	exitCode := run([]string{"tn", "Review PR #123 tomorrow high priority @work"}, &out, &errOut)
-	if exitCode != 0 {
-		t.Fatalf("expected exit code 0, got %d", exitCode)
-	}
-
-	if got := strings.TrimSpace(out.String()); got != "[stub] tn create: Review PR #123 tomorrow high priority @work" {
-		t.Fatalf("unexpected tn create output: %q", got)
-	}
+	requireNotImplemented(t, exitCode, out.String(), errOut.String())
 }
 
 func TestRun_TNListFlags(t *testing.T) {
@@ -124,27 +112,7 @@ func TestRun_TNUpdateFlags(t *testing.T) {
 	var errOut bytes.Buffer
 
 	exitCode := run([]string{"tn", "update", "abc123", "--status", "completed", "--priority", "high", "--due", "2025-08-20", "--add-tags", "urgent,bug", "--remove-tags", "low-priority", "--add-contexts", "office", "--add-projects", "Website"}, &out, &errOut)
-	if exitCode != 0 {
-		t.Fatalf("expected exit code 0, got %d", exitCode)
-	}
-
-	got := strings.TrimSpace(out.String())
-	if !strings.Contains(got, "[stub] tn update abc123") {
-		t.Fatalf("unexpected tn update output: %q", got)
-	}
-	for _, expected := range []string{
-		`status="completed"`,
-		`priority="high"`,
-		`due="2025-08-20"`,
-		`add-tags="urgent,bug"`,
-		`remove-tags="low-priority"`,
-		`add-contexts="office"`,
-		`add-projects="Website"`,
-	} {
-		if !strings.Contains(got, expected) {
-			t.Fatalf("missing expected update flag %q in output: %q", expected, got)
-		}
-	}
+	requireNotImplemented(t, exitCode, out.String(), errOut.String())
 }
 
 func TestRun_TNSearch(t *testing.T) {
@@ -152,11 +120,19 @@ func TestRun_TNSearch(t *testing.T) {
 	var errOut bytes.Buffer
 
 	exitCode := run([]string{"tn", "search", "groceries"}, &out, &errOut)
-	if exitCode != 0 {
-		t.Fatalf("expected exit code 0, got %d", exitCode)
-	}
+	requireNotImplemented(t, exitCode, out.String(), errOut.String())
+}
 
-	if got := strings.TrimSpace(out.String()); got != `[stub] tn search "groceries"` {
-		t.Fatalf("unexpected tn search output: %q", got)
+func requireNotImplemented(t *testing.T, exitCode int, stdout string, stderr string) {
+	t.Helper()
+
+	if exitCode != 2 {
+		t.Fatalf("expected exit code 2, got %d", exitCode)
+	}
+	if stdout != "" {
+		t.Fatalf("expected no stdout, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "not implemented") {
+		t.Fatalf("expected not implemented error, got %q", stderr)
 	}
 }

@@ -17,52 +17,6 @@ const (
 	taskDateLayout   = "2006-01-02 15:04"
 )
 
-func printStubInteractiveMode(stdout io.Writer) error {
-	return printLine(stdout, "[stub] tn interactive mode")
-}
-
-func printStubCreate(stdout io.Writer, args []string) error {
-	return printf(stdout, "[stub] tn create: %s\n", strings.Join(args, " "))
-}
-
-func printStubComplete(stdout io.Writer, taskID string) error {
-	return printf(stdout, "[stub] tn complete %s\n", taskID)
-}
-
-func printStubToggle(stdout io.Writer, taskID string) error {
-	return printf(stdout, "[stub] tn toggle %s\n", taskID)
-}
-
-func printStubArchive(stdout io.Writer, taskID string) error {
-	return printf(stdout, "[stub] tn archive %s\n", taskID)
-}
-
-func printStubDelete(stdout io.Writer, taskID string, force bool) error {
-	return printf(stdout, "[stub] tn delete %s force=%t\n", taskID, force)
-}
-
-func printStubUpdate(
-	stdout io.Writer,
-	taskID, status, priority, due, addTags, removeTags, addContexts, addProjects string,
-) error {
-	return printf(
-		stdout,
-		"[stub] tn update %s status=%q priority=%q due=%q add-tags=%q remove-tags=%q add-contexts=%q add-projects=%q\n",
-		taskID,
-		status,
-		priority,
-		due,
-		addTags,
-		removeTags,
-		addContexts,
-		addProjects,
-	)
-}
-
-func printStubSearch(stdout io.Writer, query string) error {
-	return printf(stdout, "[stub] tn search %q\n", query)
-}
-
 func PrintList(stdout io.Writer, req tnservice.ListRequest, result tnservice.ListResult) error {
 	if req.JSON {
 		return printListJSON(stdout, req, result)

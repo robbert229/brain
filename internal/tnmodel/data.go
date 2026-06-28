@@ -290,7 +290,23 @@ func normalizeFrontmatterFields(raw map[string]any) map[string]any {
 
 	copyLegacyField(normalized, "dateCreated", "date_created")
 	copyLegacyField(normalized, "dateModified", "date_modified")
+	normalizeDateTimeField(normalized, "date_created")
+	normalizeDateTimeField(normalized, "date_modified")
 	return normalized
+}
+
+func normalizeDateTimeField(values map[string]any, key string) {
+	value, ok := values[key].(string)
+	if !ok {
+		return
+	}
+
+	t, err := parseWithLayouts(value, dateTimeLayouts)
+	if err != nil {
+		return
+	}
+
+	values[key] = t.Format(time.RFC3339Nano)
 }
 
 func copyLegacyField(values map[string]any, legacy string, canonical string) {
