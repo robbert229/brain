@@ -55,6 +55,7 @@ func printListJSON(stdout io.Writer, req tnservice.ListRequest, result tnservice
 	}
 
 	enc := json.NewEncoder(stdout)
+	enc.SetIndent("", "  ")
 	return enc.Encode(jsonResult{
 		Success: true,
 		Data: dataResult{
