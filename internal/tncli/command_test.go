@@ -2,6 +2,7 @@ package tncli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -20,9 +21,10 @@ import (
 )
 
 type CLIE2EScenario struct {
-	Date   string `yaml:"date"`
-	Cmd    string `yaml:"cmd"`
-	Output string `yaml:"output"`
+	Date         string `yaml:"date"`
+	Cmd          string `yaml:"cmd"`
+	OutputJSON   string `yaml:"output_json"`
+	OutputStdout string `yaml:"output_stdout"`
 }
 
 type listStubArgs struct {
@@ -105,7 +107,6 @@ func TestCLIE2E_Fixtures(t *testing.T) {
 			now, err := parseScenarioDate(cfg.Date)
 			require.NoError(t, err)
 
-			buf := bytes.NewBuffer(nil)
 			service := tnservice.NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(filepath.Join(scenarioDir, "vault")))
 
 			req := tnservice.ListRequest{
@@ -120,10 +121,26 @@ func TestCLIE2E_Fixtures(t *testing.T) {
 			result, err := service.List(t.Context(), req)
 			require.NoError(t, err)
 
-			err = tncli.PrintList(buf, req, result)
+			stdoutBuf := bytes.NewBuffer(nil)
+
+			err = tncli.PrintList(stdoutBuf, req, result)
 			require.NoError(t, err)
 
-			require.Equal(t, cfg.Output, buf.String())
+			if cfg.OutputJSON != "" {
+				var actualJSON, expectedJSON map[string]any
+				err := json.Unmarshal([]byte(cfg.OutputJSON), &expectedJSON)
+				require.NoError(t, err)
+
+				err = json.Unmarshal(stdoutBuf.Bytes(), &actualJSON)
+				require.NoError(t, err)
+
+				require.Equal(t, expectedJSON, actualJSON)
+			} else if cfg.OutputStdout != "" {
+				require.Equal(t, cfg.OutputStdout, stdoutBuf.String())
+			} else {
+				t.Fatal("expected either output_json or output_stdout to be set")
+			}
+
 		})
 	}
 }
