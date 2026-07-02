@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,33 +36,123 @@ func PrintList(stdout io.Writer, req tnservice.ListRequest, result tnservice.Lis
 	return nil
 }
 
+type Meta struct {
+	Filter    any  `json:"filter"`
+	Today     bool `json:"today"`
+	Overdue   bool `json:"overdue"`
+	Completed bool `json:"completed"`
+	Limit     int  `json:"limit"`
+}
+
+type Output struct {
+	Meta    Meta `json:"meta"`
+	Success bool `json:"success"`
+	Data    Data `json:"data"`
+}
+
+type Data struct {
+	Tasks []DTOTask `json:"tasks"`
+}
+
+type DTOTask struct {
+	Path             string   `json:"path"`
+	Title            string   `json:"title"`
+	Status           string   `json:"status"`
+	Priority         string   `json:"priority"`
+	Scheduled        string   `json:"scheduled,omitempty"`
+	DateCreated      string   `json:"dateCreated"`
+	DateModified     string   `json:"dateModified"`
+	CompletedDate    string   `json:"completedDate,omitempty"`
+	Tags             []string `json:"tags"`
+	Archived         bool     `json:"archived"`
+	ID               string   `json:"id"`
+	Contexts         []string `json:"contexts"`
+	Projects         []string `json:"projects"`
+	TotalTrackedTime int      `json:"totalTrackedTime"`
+	IsBlocked        bool     `json:"isBlocked"`
+	IsBlocking       bool     `json:"isBlocking"`
+}
+
+func DTOFromTask(note *tnmodel.TaskNote) DTOTask {
+	scheduled := tnmodel.Scheduled(note)
+
+	contexts := note.Frontmatter.Contexts
+	if len(contexts) == 0 {
+		contexts = []string{}
+	}
+
+	projects := note.Frontmatter.Projects
+	if len(projects) == 0 {
+		projects = []string{}
+	}
+
+	return DTOTask{
+		Path:             tnmodel.ID(note),
+		Title:            tnmodel.Title(note),
+		Status:           tnmodel.Status(note),
+		Priority:         tnmodel.Priority(note),
+		Scheduled:        formatTaskTime(scheduled, "2006-01-02"),
+		DateCreated:      formatRequiredTaskTime(note.Frontmatter.DateCreated),
+		DateModified:     formatRequiredTaskTime(note.Frontmatter.DateModified),
+		CompletedDate:    formatTaskCompletedDate(note.Frontmatter.CompletedDate),
+		Tags:             tnmodel.Tags(note),
+		Archived:         false,
+		ID:               tnmodel.ID(note),
+		Contexts:         note.Frontmatter.Contexts,
+		Projects:         note.Frontmatter.Projects,
+		TotalTrackedTime: 0,
+		IsBlocked:        len(note.Frontmatter.BlockedBy) > 0,
+		IsBlocking:       false,
+	}
+}
+
+func formatTaskTime(value *time.Time, layout string) string {
+	if value == nil {
+		return ""
+	}
+
+	return value.Format(layout)
+}
+
+func formatRequiredTaskTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+
+	return value.Format("2006-01-02T15:04:05.000-07:00")
+}
+
+func formatTaskCompletedDate(value *tnmodel.Date) string {
+	if value == nil || value.IsZero() {
+		return ""
+	}
+
+	return (*value).Format("2006-01-02")
+}
+
+func DTOSFromTasks(notes []*tnmodel.TaskNote) []DTOTask {
+	tasks := make([]DTOTask, len(notes))
+	for i, note := range notes {
+		tasks[i] = DTOFromTask(note)
+	}
+	return tasks
+}
+
 func printListJSON(stdout io.Writer, req tnservice.ListRequest, result tnservice.ListResult) error {
-	type metaResult struct {
-		Filter    any  `json:"filter"`
-		Today     bool `json:"today"`
-		Overdue   bool `json:"overdue"`
-		Completed bool `json:"completed"`
-		Limit     int  `json:"limit"`
-	}
-
-	type dataResult struct {
-		Tasks []*tnmodel.TaskNote `json:"tasks"`
-	}
-
-	type jsonResult struct {
-		Meta    metaResult `json:"meta"`
-		Success bool       `json:"success"`
-		Data    dataResult `json:"data"`
-	}
+	tasks := DTOSFromTasks(result.Notes)
+	sort.SliceStable(tasks, func(i, j int) bool {
+		return tasks[i].DateCreated > tasks[j].DateCreated
+	})
 
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
-	return enc.Encode(jsonResult{
+
+	return enc.Encode(Output{
 		Success: true,
-		Data: dataResult{
-			Tasks: result.Notes,
+		Data: Data{
+			Tasks: tasks,
 		},
-		Meta: metaResult{
+		Meta: Meta{
 			Filter:    nil,
 			Today:     req.Today,
 			Overdue:   req.Overdue,

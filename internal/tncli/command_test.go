@@ -2,7 +2,6 @@ package tncli_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"flag"
 	"io"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/robbert229/brain/internal/tncli"
+	"github.com/robbert229/brain/internal/tnmodel"
 	"github.com/robbert229/brain/internal/tnservice"
 	"github.com/robbert229/brain/internal/tnstorage"
 	"github.com/stretchr/testify/require"
@@ -63,6 +63,115 @@ func parseListStubArgs(cmd string) (listStubArgs, error) {
 	}
 
 	return args, nil
+}
+
+func TestPrintListJSON(t *testing.T) {
+	const expected = `{
+  "meta": {
+	"filter": null,
+	"today": false,
+	"overdue": false,
+	"completed": false,
+	"limit": 20
+  },
+  "success": true,
+  "data": {
+	"tasks": [
+	  {
+		"path": "TaskNotes/Tasks/Work on 3d printers.md",
+		"title": "Work on 3d printers",
+		"status": "open",
+		"priority": "low",
+		"scheduled": "2026-06-20",
+		"dateCreated": "2026-06-20T13:48:44.160-07:00",
+		"dateModified": "2026-06-20T13:48:44.160-07:00",
+		"tags": [
+		  "task",
+		  "test"
+		],
+		"archived": false,
+		"id": "TaskNotes/Tasks/Work on 3d printers.md",
+		"contexts": [],
+		"projects": [],
+		"totalTrackedTime": 0,
+		"isBlocked": false,
+		"isBlocking": false
+	  },
+      {
+		"path": "TaskNotes/Tasks/Go grocery shopping later.md",
+		"title": "Go grocery shopping later",
+		"status": "open",
+		"priority": "normal",
+		"scheduled": "2026-06-20",
+		"dateCreated": "2026-06-20T12:48:44.160-07:00",
+		"dateModified": "2026-06-20T12:48:44.160-07:00",
+		"tags": [
+		  "task"
+		],
+		"archived": false,
+		"id": "TaskNotes/Tasks/Go grocery shopping later.md",
+		"contexts": [],
+		"projects": [],
+		"totalTrackedTime": 0,
+		"isBlocked": false,
+		"isBlocking": false
+	  }
+	]
+  }
+}`
+
+	path := "TaskNotes/Tasks/Work on 3d printers.md"
+	earlierPath := "TaskNotes/Tasks/Go grocery shopping later.md"
+	priority := tnmodel.PriorityLow
+	normalPriority := tnmodel.PriorityNormal
+	scheduled := tnmodel.DateOrDateTime("2026-06-20")
+	created := time.Date(2026, 6, 20, 13, 48, 44, 160000000, time.FixedZone("PDT", -7*3600))
+	earlierCreated := created.Add(-time.Hour)
+
+	task := &tnmodel.TaskNote{
+		File: &tnmodel.TaskNoteFile{
+			Path: &path,
+		},
+		Frontmatter: tnmodel.TaskFrontmatter{
+			Title:        "Work on 3d printers",
+			Status:       tnmodel.StatusOpen,
+			Priority:     &priority,
+			Scheduled:    &scheduled,
+			DateCreated:  created,
+			DateModified: created,
+			Tags:         []string{"task", "test"},
+			Contexts:     []string{},
+			Projects:     []string{},
+		},
+	}
+	earlierTask := &tnmodel.TaskNote{
+		File: &tnmodel.TaskNoteFile{
+			Path: &earlierPath,
+		},
+		Frontmatter: tnmodel.TaskFrontmatter{
+			Title:        "Go grocery shopping later",
+			Status:       tnmodel.StatusOpen,
+			Priority:     &normalPriority,
+			Scheduled:    &scheduled,
+			DateCreated:  earlierCreated,
+			DateModified: earlierCreated,
+			Tags:         []string{"task"},
+			Contexts:     []string{},
+			Projects:     []string{},
+		},
+	}
+
+	stdoutBuf := bytes.NewBuffer(nil)
+
+	err := tncli.PrintList(stdoutBuf, tnservice.ListRequest{
+		JSON:  true,
+		Limit: 20,
+	}, tnservice.ListResult{
+		Notes:      []*tnmodel.TaskNote{task, earlierTask},
+		FoundCount: 2,
+	})
+	require.NoError(t, err)
+	require.JSONEq(t, expected, stdoutBuf.String())
 }
 
 func TestCLIE2E_Fixtures(t *testing.T) {
@@ -127,14 +236,7 @@ func TestCLIE2E_Fixtures(t *testing.T) {
 			require.NoError(t, err)
 
 			if cfg.OutputJSON != "" {
-				var actualJSON, expectedJSON map[string]any
-				err := json.Unmarshal([]byte(cfg.OutputJSON), &expectedJSON)
-				require.NoError(t, err)
-
-				err = json.Unmarshal(stdoutBuf.Bytes(), &actualJSON)
-				require.NoError(t, err)
-
-				require.Equal(t, expectedJSON, actualJSON)
+				require.JSONEq(t, cfg.OutputJSON, stdoutBuf.String())
 			} else if cfg.OutputStdout != "" {
 				require.Equal(t, cfg.OutputStdout, stdoutBuf.String())
 			} else {
