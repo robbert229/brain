@@ -14,6 +14,7 @@ status: open
 priority: normal
 scheduled: 2026-06-20
 due: 2026-06-21
+completedDate: 2026-06-20
 dateCreated: 2026-06-20T13:48:44.160-07:00
 dateModified: 2026-06-20T13:48:44.160-07:00
 tags:
@@ -30,6 +31,8 @@ tags:
 	require.Equal(t, "2026-06-20", Scheduled(note).Format("2006-01-02"))
 	require.NotNil(t, Due(note))
 	require.Equal(t, "2026-06-21", Due(note).Format("2006-01-02"))
+	require.NotNil(t, note.Frontmatter.CompletedDate)
+	require.Equal(t, "2026-06-20", note.Frontmatter.CompletedDate.Format("2006-01-02"))
 	require.False(t, note.Frontmatter.DateCreated.IsZero())
 	require.False(t, note.Frontmatter.DateModified.IsZero())
 	require.Len(t, Tags(note), 1)

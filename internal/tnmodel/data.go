@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atombender/go-jsonschema/pkg/types"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,6 +45,24 @@ const (
 	PriorityNormal = "normal"
 	PriorityHigh   = "high"
 )
+
+func (d *Date) UnmarshalYAML(value *yaml.Node) error {
+	if value == nil || strings.TrimSpace(value.Value) == "" {
+		return nil
+	}
+
+	parsed, err := parseWithLayouts(strings.TrimSpace(value.Value), []string{
+		dateLayout,
+		time.RFC3339Nano,
+		time.RFC3339,
+	})
+	if err != nil {
+		return err
+	}
+
+	*d = Date(types.SerializableDate{Time: parsed})
+	return nil
+}
 
 // Decode parses a TaskNotes document (YAML frontmatter + markdown body).
 func Decode(id string, content string) (*TaskNote, error) {
@@ -270,6 +289,8 @@ func frontmatterExtra(raw map[string]any) map[string]any {
 		"priority",
 		"scheduled",
 		"due",
+		"completedDate",
+		"completed_date",
 		"dateCreated",
 		"dateModified",
 		"date_created",
@@ -290,6 +311,7 @@ func normalizeFrontmatterFields(raw map[string]any) map[string]any {
 
 	copyLegacyField(normalized, "dateCreated", "date_created")
 	copyLegacyField(normalized, "dateModified", "date_modified")
+	copyLegacyField(normalized, "completedDate", "completed_date")
 	normalizeDateTimeField(normalized, "date_created")
 	normalizeDateTimeField(normalized, "date_modified")
 	return normalized
