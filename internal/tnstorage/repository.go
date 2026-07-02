@@ -59,7 +59,10 @@ func (repo DiskTaskNoteRepository) Crawl(ctx context.Context, fn func(*tnmodel.T
 
 		note, err := tnmodel.Decode(taskID, string(content))
 		if err != nil {
-			return fmt.Errorf("decode file %q: %w", path, err)
+			// instead of returning an error, we just skip the file. It's
+			// possible that the note is not a TaskNote, so we don't want to
+			// fail the entire crawl.
+			return nil
 		}
 
 		isTaskNote, err := CoincidenceDetector(ctx, note)
