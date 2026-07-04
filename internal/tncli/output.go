@@ -18,6 +18,7 @@ const (
 	taskDateLayout   = "2006-01-02 15:04"
 )
 
+// PrintList prints out the response header and list of tasks.
 func PrintList(stdout io.Writer, req tnservice.ListRequest, result tnservice.ListResult) error {
 	if req.JSON {
 		return printListJSON(stdout, req, result)
@@ -36,7 +37,8 @@ func PrintList(stdout io.Writer, req tnservice.ListRequest, result tnservice.Lis
 	return nil
 }
 
-type Meta struct {
+// DTOMeta is a struct for the JSON response metadata.
+type DTOMeta struct {
 	Filter    any  `json:"filter"`
 	Today     bool `json:"today"`
 	Overdue   bool `json:"overdue"`
@@ -44,21 +46,25 @@ type Meta struct {
 	Limit     int  `json:"limit"`
 }
 
-type Output struct {
-	Meta    Meta `json:"meta"`
-	Success bool `json:"success"`
-	Data    Data `json:"data"`
+// DTOOutput is a struct for the JSON response output.
+type DTOOutput struct {
+	Meta    DTOMeta `json:"meta"`
+	Success bool    `json:"success"`
+	Data    DTOData `json:"data"`
 }
 
-type Data struct {
+// DTOData is a struct for the JSON response data.
+type DTOData struct {
 	Tasks []DTOTask `json:"tasks"`
 }
 
+// DTOTask is a struct for the JSON response task.
 type DTOTask struct {
 	Path             string   `json:"path"`
 	Title            string   `json:"title"`
 	Status           string   `json:"status"`
 	Priority         string   `json:"priority"`
+	Due              string   `json:"due,omitempty"`
 	Scheduled        string   `json:"scheduled,omitempty"`
 	DateCreated      string   `json:"dateCreated"`
 	DateModified     string   `json:"dateModified"`
@@ -73,7 +79,9 @@ type DTOTask struct {
 	IsBlocking       bool     `json:"isBlocking"`
 }
 
+// DTOFromTask converts a domain model into a dto task.
 func DTOFromTask(note *tnmodel.TaskNote) DTOTask {
+	due := tnmodel.Due(note)
 	scheduled := tnmodel.Scheduled(note)
 
 	contexts := note.Frontmatter.Contexts
@@ -91,6 +99,7 @@ func DTOFromTask(note *tnmodel.TaskNote) DTOTask {
 		Title:            tnmodel.Title(note),
 		Status:           tnmodel.Status(note),
 		Priority:         tnmodel.Priority(note),
+		Due:              formatTaskTime(due, "2006-01-02"),
 		Scheduled:        formatTaskTime(scheduled, "2006-01-02"),
 		DateCreated:      formatRequiredTaskTime(note.Frontmatter.DateCreated),
 		DateModified:     formatRequiredTaskTime(note.Frontmatter.DateModified),
@@ -147,12 +156,12 @@ func printListJSON(stdout io.Writer, req tnservice.ListRequest, result tnservice
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 
-	return enc.Encode(Output{
+	return enc.Encode(DTOOutput{
 		Success: true,
-		Data: Data{
+		Data: DTOData{
 			Tasks: tasks,
 		},
-		Meta: Meta{
+		Meta: DTOMeta{
 			Filter:    nil,
 			Today:     req.Today,
 			Overdue:   req.Overdue,
@@ -255,11 +264,6 @@ func formatTags(tags []string) string {
 	}
 
 	return "#" + strings.Join(tags, " #")
-}
-
-func printLine(stdout io.Writer, value string) error {
-	_, err := fmt.Fprintln(stdout, value)
-	return err
 }
 
 func printf(stdout io.Writer, format string, args ...any) error {

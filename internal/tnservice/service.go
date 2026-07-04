@@ -3,11 +3,13 @@ package tnservice
 import (
 	"context"
 	"fmt"
+	"go/parser"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/robbert229/brain/internal/tnmodel"
+	"github.com/robbert229/brain/internal/tnnlpcore"
 	"github.com/robbert229/brain/internal/tnstorage"
 )
 
@@ -26,21 +28,41 @@ type ListResult struct {
 	FoundCount int
 }
 
-type TaskNoteService struct {
+type Service struct {
 	Repository tnstorage.TaskNoteRepository
+	Parser     *tnnlpcore.NaturalLanguageParserCore
 }
 
-func NewTaskNoteService(repository tnstorage.TaskNoteRepository) TaskNoteService {
-	return TaskNoteService{Repository: repository}
+func NewTaskNoteService(repository tnstorage.TaskNoteRepository) Service {
+	parserOpts := tnnlpcore.ParserOptions{}
+	parserOpts.DateLocale = "en-US"
+
+	return Service{
+		Repository: repository,
+		Parser: tnnlpcore.NewNaturalLanguageParserCore(
+			nil,
+			nil,
+			true,
+			"EN-us",
+			nil,
+			nil,
+			parserOpts,
+		),
+	}
 }
 
-func (service TaskNoteService) List(ctx context.Context, req ListRequest) (ListResult, error) {
-	now := req.Now
+func getNow(now time.Time) time.Time {
 	if now.IsZero() {
 		now = time.Now()
 	}
 
-	repo := service.Repository
+	return now
+}
+
+func (s Service) List(ctx context.Context, req ListRequest) (ListResult, error) {
+	now := getNow(req.Now)
+
+	repo := s.Repository
 	if repo == nil {
 		return ListResult{}, fmt.Errorf("task note repository is required")
 	}
@@ -138,4 +160,20 @@ func compareDate(t *time.Time, now time.Time) int {
 	}
 
 	return 0
+}
+
+type CreateRequest struct {
+	NaturalLanguageInput string
+	Now                  time.Time
+}
+
+type CreateResponse struct {
+	TaskNote *tnmodel.TaskNote
+}
+
+func (s Service) Create(ctx context.Context, req CreateRequest) (CreateResponse, error) {
+	now := getNow(req.Now)
+
+	parsed := s.Parser.ParseInput(req.NaturalLanguageInput)
+	
 }

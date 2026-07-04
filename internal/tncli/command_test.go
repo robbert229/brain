@@ -216,7 +216,9 @@ func TestCLIE2E_Fixtures(t *testing.T) {
 			now, err := parseScenarioDate(cfg.Date)
 			require.NoError(t, err)
 
-			service := tnservice.NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(filepath.Join(scenarioDir, "vault")))
+			service := tnservice.NewTaskNoteService(
+				tnstorage.NewDiskTaskNoteRepository(filepath.Join(scenarioDir, "vault")),
+			)
 
 			req := tnservice.ListRequest{
 				Today:     stubArgs.today,

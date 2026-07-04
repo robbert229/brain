@@ -1,39 +1,17 @@
 # brain
 
-A minimal Go project scaffold with a tiny CLI and tests.
+Brain is a command line utility, and daemon for managing a secondary brain in markdown, and yaml. It is designed to be 
+used with Obsidian notebook's, but can be used standalone.
 
-## Prerequisites
+## Features
 
-- Go 1.22+
-
-## Quick start
-
-```bash
-go run ./cmd/brain
-```
-
-Try a custom name:
-
-```bash
-go run ./cmd/brain --name john
-```
-
-Print version:
-
-```bash
-go run ./cmd/brain --version
-```
-
-## Test
-
-```bash
-go test ./...
-```
-
-## TaskNotes
+### TaskNotes
 
 The TaskNotes CLI is a re-implementation of the TaskNotes CLI written in Go. It is completely daemonless and functions
 without any dependency on Obsidian. 
+
+When the CLI is invoked from within a vault it will search the entire vault. It does this by navigating to parent 
+folders until it finds a `.obsidian` folder. If invoked outside of a vault it will only search files in the current folder.
 
 ```
 # Create task (natural language parsed)

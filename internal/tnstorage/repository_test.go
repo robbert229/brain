@@ -122,19 +122,21 @@ tags:
 	require.Equal(t, 2, callCount)
 }
 
-func TestDiskTaskNoteRepository_Crawl_InvalidMarkdownFile(t *testing.T) {
+func TestDiskTaskNoteRepository_Crawl_SkipsInvalidMarkdownFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	repo := NewDiskTaskNoteRepository(tmpDir)
 
 	file := filepath.Join(tmpDir, "invalid.md")
 	require.NoError(t, os.WriteFile(file, []byte("---\ninvalid: [syntax"), 0644))
 
+	callCount := 0
 	err := repo.Crawl(t.Context(), func(_ *tnmodel.TaskNote) error {
+		callCount++
 		return nil
 	})
 
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "decode file")
+	require.NoError(t, err)
+	require.Equal(t, 0, callCount)
 }
 
 func TestDiskTaskNoteRepository_Crawl_EmptyDirectory(t *testing.T) {

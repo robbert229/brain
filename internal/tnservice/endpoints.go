@@ -23,7 +23,7 @@ func NewTaskNoteEndpoints(service taskNoteLister) Endpoints {
 	}
 }
 
-// MakeListEndpoint adapts TaskNoteService.List to a go-kit endpoint.
+// MakeListEndpoint adapts Service.List to a go-kit endpoint.
 func MakeListEndpoint(service taskNoteLister) endpoint.Endpoint {
 	return func(ctx context.Context, request any) (any, error) {
 		req, ok := request.(ListRequest)

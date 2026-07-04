@@ -22,7 +22,9 @@ type DiskTaskNoteRepository struct {
 
 // NewDiskTaskNoteRepository creates a repository backed by workingDirectory.
 func NewDiskTaskNoteRepository(workingDirectory string) DiskTaskNoteRepository {
-	return DiskTaskNoteRepository{workingDirectory: workingDirectory}
+	return DiskTaskNoteRepository{
+		workingDirectory: workingDirectory,
+	}
 }
 
 // Crawl crawls all notes in the repository's working directory.
@@ -80,6 +82,31 @@ func (repo DiskTaskNoteRepository) Crawl(ctx context.Context, fn func(*tnmodel.T
 
 		return nil
 	})
+}
+
+// FilterFn is a function that filters the task notes.
+type FilterFn func(*tnmodel.TaskNote) (bool, error)
+
+// Filter returns the task notes that satisfy the filter.
+func (repo DiskTaskNoteRepository) Filter(ctx context.Context, fn FilterFn) ([]*tnmodel.TaskNote, error) {
+	var result []*tnmodel.TaskNote
+	err := repo.Crawl(ctx, func(note *tnmodel.TaskNote) error {
+		ok, err := fn(note)
+		if err != nil {
+			return fmt.Errorf("filter unable to handle note: %v %w", note, err)
+		}
+
+		if ok {
+			result = append(result, note)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("unable to filter: %w", err)
+	}
+
+	return result, nil
 }
 
 func CoincidenceDetector(ctx context.Context, note *tnmodel.TaskNote) (bool, error) {

@@ -72,6 +72,15 @@ tags:
 ---
 # Other task
 `)
+	writeTaskNote(t, tmpDir, "overdue.md", `---
+status: open
+priority: normal
+due: 2026-06-20
+tags:
+  - task
+---
+# Overdue task
+`)
 
 	result, err := service.List(t.Context(), ListRequest{
 		Today: true,
