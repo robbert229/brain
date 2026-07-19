@@ -9,7 +9,7 @@ import (
 )
 
 func TestListEndpoint_DispatchesToService(t *testing.T) {
-	service := NewTaskNoteService(stubTaskNoteRepository{
+	service := NewService(stubTaskNoteRepository{
 		notes: []*tnmodel.TaskNote{
 			{
 				File: &tnmodel.TaskNoteFile{Path: stringPtr("from-endpoint.md")},
@@ -26,14 +26,14 @@ func TestListEndpoint_DispatchesToService(t *testing.T) {
 	response, err := endpoint(t.Context(), ListRequest{})
 	require.NoError(t, err)
 
-	result, ok := response.(ListResult)
+	result, ok := response.(ListResponse)
 	require.True(t, ok)
 	require.Equal(t, 1, result.FoundCount)
 	require.Equal(t, "From endpoint", tnmodel.Title(result.Notes[0]))
 }
 
 func TestListEndpoint_RejectsUnexpectedRequest(t *testing.T) {
-	service := NewTaskNoteService(stubTaskNoteRepository{})
+	service := NewService(stubTaskNoteRepository{})
 	endpoint := MakeListEndpoint(service)
 
 	response, err := endpoint(t.Context(), "not a list request")

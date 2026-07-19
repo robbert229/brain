@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/go-kit/kit/endpoint"
 	"github.com/robbert229/brain/internal/tnservice"
@@ -37,22 +39,27 @@ func NewCommand(stdout io.Writer) *cobra.Command {
 			return tnservice.Endpoints{}, err
 		}
 
-		service := tnservice.NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(wd))
+		vaultDir, err := tnstorage.FindVault(wd)
+		if err != nil {
+			if !errors.Is(err, tnstorage.ErrVaultNotFound) {
+				return tnservice.Endpoints{}, err
+			}
+
+			vaultDir = wd
+		}
+
+		repository, err := tnstorage.NewDiskTaskNoteRepository(
+			tnstorage.WithWorkingDirectory(filepath.Join(vaultDir, "../")),
+		)
+		if err != nil {
+			return tnservice.Endpoints{}, err
+		}
+
+		service := tnservice.NewService(repository)
 		return tnservice.NewTaskNoteEndpoints(service), nil
 	}
 
-	tnCmd := &cobra.Command{
-		Use:   "tn [input]",
-		Short: "TaskNotes command group",
-		Args:  cobra.ArbitraryArgs,
-		RunE: func(_ *cobra.Command, args []string) error {
-			if len(args) == 0 {
-				return notImplemented("tn interactive")
-			}
-
-			return notImplemented("tn create")
-		},
-	}
+	tnCmd := newCreateCommand(stdout, endpointAdapter(endpointSetFactory, func(endpoints tnservice.Endpoints) endpoint.Endpoint { return endpoints.Create }))
 
 	tnCmd.AddCommand(
 		newListCommand(stdout, endpointAdapter(endpointSetFactory, func(endpoints tnservice.Endpoints) endpoint.Endpoint { return endpoints.List })),
@@ -63,6 +70,43 @@ func NewCommand(stdout io.Writer) *cobra.Command {
 		newUpdateCommand(stdout),
 		newSearchCommand(stdout),
 	)
+	return tnCmd
+}
+
+func newCreateCommand(stdout io.Writer, factory endpointFactory) *cobra.Command {
+	var req tnservice.CreateRequest
+
+	tnCmd := &cobra.Command{
+		Use:   "tn [input]",
+		Short: "TaskNotes command group",
+		Args:  cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return notImplemented("tn interactive")
+			}
+
+			// Join all arguments to form the natural language input
+			req.NaturalLanguageInput = strings.Join(args, " ")
+
+			createEndpoint, err := factory()
+			if err != nil {
+				return err
+			}
+
+			response, err := createEndpoint(cmd.Context(), req)
+			if err != nil {
+				return err
+			}
+
+			result, ok := response.(tnservice.CreateResponse)
+			if !ok {
+				return fmt.Errorf("expected %T, got %T", tnservice.CreateResponse{}, response)
+			}
+
+			return PrintCreate(stdout, result)
+		},
+	}
+
 	return tnCmd
 }
 
@@ -84,15 +128,15 @@ func newListCommand(stdout io.Writer, factory endpointFactory) *cobra.Command {
 				return err
 			}
 
-			result, ok := response.(tnservice.ListResult)
+			result, ok := response.(tnservice.ListResponse)
 			if !ok {
-				return fmt.Errorf("expected %T, got %T", tnservice.ListResult{}, response)
+				return fmt.Errorf("expected %T, got %T", tnservice.ListResponse{}, response)
 			}
 
 			return PrintList(stdout, req, result)
 		},
 	}
-	cmd.Flags().BoolVar(&req.Today, "today", false, "show tasks due today")
+	cmd.Flags().BoolVar(&req.Today, "today", false, "show tasks due/scheduled for today")
 	cmd.Flags().BoolVar(&req.Overdue, "overdue", false, "show overdue tasks")
 	cmd.Flags().BoolVar(&req.Completed, "completed", false, "show completed tasks")
 	cmd.Flags().StringVar(&req.Filter, "filter", "", "filter expression")

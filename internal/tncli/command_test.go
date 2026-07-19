@@ -166,7 +166,7 @@ func TestPrintListJSON(t *testing.T) {
 	err := tncli.PrintList(stdoutBuf, tnservice.ListRequest{
 		JSON:  true,
 		Limit: 20,
-	}, tnservice.ListResult{
+	}, tnservice.ListResponse{
 		Notes:      []*tnmodel.TaskNote{task, earlierTask},
 		FoundCount: 2,
 	})
@@ -216,9 +216,13 @@ func TestCLIE2E_Fixtures(t *testing.T) {
 			now, err := parseScenarioDate(cfg.Date)
 			require.NoError(t, err)
 
-			service := tnservice.NewTaskNoteService(
-				tnstorage.NewDiskTaskNoteRepository(filepath.Join(scenarioDir, "vault")),
+			repository, err := tnstorage.NewDiskTaskNoteRepository(
+				tnstorage.WithWorkingDirectory(
+					filepath.Join(scenarioDir, "vault")),
 			)
+			require.NoError(t, err)
+
+			service := tnservice.NewService(repository)
 
 			req := tnservice.ListRequest{
 				Today:     stubArgs.today,
@@ -244,7 +248,6 @@ func TestCLIE2E_Fixtures(t *testing.T) {
 			} else {
 				t.Fatal("expected either output_json or output_stdout to be set")
 			}
-
 		})
 	}
 }

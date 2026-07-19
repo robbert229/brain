@@ -12,7 +12,8 @@ import (
 
 func TestDiskTaskNoteRepository_Crawl_WalksDirectoryAndDecodesMarkdownFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	repo := NewDiskTaskNoteRepository(tmpDir)
+	repo, err := NewDiskTaskNoteRepository(WithWorkingDirectory(tmpDir))
+	require.NoError(t, err)
 
 	// Create test markdown files
 	file1 := filepath.Join(tmpDir, "task1.md")
@@ -47,7 +48,7 @@ Second task description.`
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "readme.txt"), []byte("not markdown"), 0644))
 
 	var notes []*tnmodel.TaskNote
-	err := repo.Crawl(t.Context(), func(note *tnmodel.TaskNote) error {
+	err = repo.Crawl(t.Context(), func(note *tnmodel.TaskNote) error {
 		notes = append(notes, note)
 		return nil
 	})
@@ -80,9 +81,10 @@ Second task description.`
 }
 
 func TestDiskTaskNoteRepository_Crawl_DirectoryNotFound(t *testing.T) {
-	repo := NewDiskTaskNoteRepository("/nonexistent/directory")
+	repo, err := NewDiskTaskNoteRepository(WithWorkingDirectory("/nonexistent/directory"))
+	require.NoError(t, err)
 
-	err := repo.Crawl(t.Context(), func(_ *tnmodel.TaskNote) error {
+	err = repo.Crawl(t.Context(), func(_ *tnmodel.TaskNote) error {
 		return nil
 	})
 	require.Error(t, err)
@@ -91,7 +93,8 @@ func TestDiskTaskNoteRepository_Crawl_DirectoryNotFound(t *testing.T) {
 
 func TestDiskTaskNoteRepository_Crawl_StopsOnCallbackError(t *testing.T) {
 	tmpDir := t.TempDir()
-	repo := NewDiskTaskNoteRepository(tmpDir)
+	repo, err := NewDiskTaskNoteRepository(WithWorkingDirectory(tmpDir))
+	require.NoError(t, err)
 
 	file1 := filepath.Join(tmpDir, "task1.md")
 	file2 := filepath.Join(tmpDir, "task2.md")
@@ -108,7 +111,7 @@ tags:
 
 	callCount := 0
 	testErr := errors.New("test callback error")
-	err := repo.Crawl(t.Context(), func(_ *tnmodel.TaskNote) error {
+	err = repo.Crawl(t.Context(), func(_ *tnmodel.TaskNote) error {
 		callCount++
 		if callCount == 1 {
 			return nil
@@ -124,13 +127,14 @@ tags:
 
 func TestDiskTaskNoteRepository_Crawl_SkipsInvalidMarkdownFile(t *testing.T) {
 	tmpDir := t.TempDir()
-	repo := NewDiskTaskNoteRepository(tmpDir)
+	repo, err := NewDiskTaskNoteRepository(WithWorkingDirectory(tmpDir))
+	require.NoError(t, err)
 
 	file := filepath.Join(tmpDir, "invalid.md")
 	require.NoError(t, os.WriteFile(file, []byte("---\ninvalid: [syntax"), 0644))
 
 	callCount := 0
-	err := repo.Crawl(t.Context(), func(_ *tnmodel.TaskNote) error {
+	err = repo.Crawl(t.Context(), func(_ *tnmodel.TaskNote) error {
 		callCount++
 		return nil
 	})
@@ -141,10 +145,11 @@ func TestDiskTaskNoteRepository_Crawl_SkipsInvalidMarkdownFile(t *testing.T) {
 
 func TestDiskTaskNoteRepository_Crawl_EmptyDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
-	repo := NewDiskTaskNoteRepository(tmpDir)
+	repo, err := NewDiskTaskNoteRepository(WithWorkingDirectory(tmpDir))
+	require.NoError(t, err)
 
 	callCount := 0
-	err := repo.Crawl(t.Context(), func(_ *tnmodel.TaskNote) error {
+	err = repo.Crawl(t.Context(), func(_ *tnmodel.TaskNote) error {
 		callCount++
 		return nil
 	})

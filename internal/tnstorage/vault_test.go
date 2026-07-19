@@ -88,9 +88,12 @@ func TestFindVault(t *testing.T) {
 			require.NoError(t, err)
 
 			vaultDir, err := FindVault(workingDirectoryABS)
-			require.NoError(t, err)
-
-			require.Equal(t, scenarioVaultABS, vaultDir)
+			if scenario.Vault != "" {
+				require.NoError(t, err)
+				require.Equal(t, scenarioVaultABS, vaultDir)
+			} else {
+				require.Error(t, err, "since there is no vault FindVault should fail: %s", vaultDir)
+			}
 		})
 	}
 }

@@ -9,22 +9,25 @@ import (
 
 // Endpoints collect the go-kit endpoints exposed by the TaskNotes service.
 type Endpoints struct {
-	List endpoint.Endpoint
+	List   endpoint.Endpoint
+	Create endpoint.Endpoint
 }
 
-type taskNoteLister interface {
-	List(ctx context.Context, req ListRequest) (ListResult, error)
+type taskNoteService interface {
+	List(ctx context.Context, req ListRequest) (ListResponse, error)
+	Create(ctx context.Context, req CreateRequest) (CreateResponse, error)
 }
 
 // NewTaskNoteEndpoints creates go-kit endpoints for the TaskNotes service.
-func NewTaskNoteEndpoints(service taskNoteLister) Endpoints {
+func NewTaskNoteEndpoints(service taskNoteService) Endpoints {
 	return Endpoints{
-		List: MakeListEndpoint(service),
+		List:   MakeListEndpoint(service),
+		Create: MakeCreateEndpoint(service),
 	}
 }
 
 // MakeListEndpoint adapts Service.List to a go-kit endpoint.
-func MakeListEndpoint(service taskNoteLister) endpoint.Endpoint {
+func MakeListEndpoint(service taskNoteService) endpoint.Endpoint {
 	return func(ctx context.Context, request any) (any, error) {
 		req, ok := request.(ListRequest)
 		if !ok {
@@ -32,5 +35,16 @@ func MakeListEndpoint(service taskNoteLister) endpoint.Endpoint {
 		}
 
 		return service.List(ctx, req)
+	}
+}
+
+func MakeCreateEndpoint(service taskNoteService) endpoint.Endpoint {
+	return func(ctx context.Context, request any) (any, error) {
+		req, ok := request.(CreateRequest)
+		if !ok {
+			return nil, fmt.Errorf("expected %T, got %T", CreateRequest{}, request)
+		}
+
+		return service.Create(ctx, req)
 	}
 }

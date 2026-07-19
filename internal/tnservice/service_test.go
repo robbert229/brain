@@ -26,8 +26,12 @@ func (repo stubTaskNoteRepository) Crawl(_ context.Context, fn func(*tnmodel.Tas
 	return nil
 }
 
+func (repo stubTaskNoteRepository) Save(_ context.Context, _ *tnmodel.TaskNote) error {
+	return nil
+}
+
 func TestList_UsesProvidedRepository(t *testing.T) {
-	service := NewTaskNoteService(stubTaskNoteRepository{
+	service := NewService(stubTaskNoteRepository{
 		notes: []*tnmodel.TaskNote{
 			{
 				File: &tnmodel.TaskNoteFile{Path: stringPtr("from-repository.md")},
@@ -50,9 +54,20 @@ func TestList_UsesProvidedRepository(t *testing.T) {
 	require.Equal(t, "from-repository.md", tnmodel.ID(result.Notes[0]))
 }
 
+func MustTaskNoteService(t *testing.T, tmpDir string) Service {
+	t.Helper()
+	repo, err := tnstorage.NewDiskTaskNoteRepository(
+		tnstorage.WithWorkingDirectory(tmpDir))
+	require.NoError(t, err)
+
+	service := NewService(repo)
+
+	return service
+}
+
 func TestList_TodayFilter(t *testing.T) {
 	tmpDir := t.TempDir()
-	service := NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(tmpDir))
+	service := MustTaskNoteService(t, tmpDir)
 
 	writeTaskNote(t, tmpDir, "today.md", `---
 status: open
@@ -95,7 +110,7 @@ tags:
 
 func TestList_OverdueFilter(t *testing.T) {
 	tmpDir := t.TempDir()
-	service := NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(tmpDir))
+	service := MustTaskNoteService(t, tmpDir)
 
 	writeTaskNote(t, tmpDir, "overdue.md", `---
 status: open
@@ -138,7 +153,7 @@ tags:
 
 func TestList_CompletedFilter(t *testing.T) {
 	tmpDir := t.TempDir()
-	service := NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(tmpDir))
+	service := MustTaskNoteService(t, tmpDir)
 
 	writeTaskNote(t, tmpDir, "done.md", `---
 status: done
@@ -170,7 +185,7 @@ tags:
 
 func TestList_Limit(t *testing.T) {
 	tmpDir := t.TempDir()
-	service := NewTaskNoteService(tnstorage.NewDiskTaskNoteRepository(tmpDir))
+	service := MustTaskNoteService(t, tmpDir)
 
 	writeTaskNote(t, tmpDir, "a.md", `---
 status: open

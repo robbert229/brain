@@ -3,7 +3,6 @@ package tnservice
 import (
 	"context"
 	"fmt"
-	"go/parser"
 	"sort"
 	"strings"
 	"time"
@@ -23,17 +22,17 @@ type ListRequest struct {
 	Now       time.Time
 }
 
-type ListResult struct {
+type ListResponse struct {
 	Notes      []*tnmodel.TaskNote
 	FoundCount int
 }
 
 type Service struct {
-	Repository tnstorage.TaskNoteRepository
+	Repository tnstorage.Repository
 	Parser     *tnnlpcore.NaturalLanguageParserCore
 }
 
-func NewTaskNoteService(repository tnstorage.TaskNoteRepository) Service {
+func NewService(repository tnstorage.Repository) Service {
 	parserOpts := tnnlpcore.ParserOptions{}
 	parserOpts.DateLocale = "en-US"
 
@@ -59,12 +58,12 @@ func getNow(now time.Time) time.Time {
 	return now
 }
 
-func (s Service) List(ctx context.Context, req ListRequest) (ListResult, error) {
+func (s Service) List(ctx context.Context, req ListRequest) (ListResponse, error) {
 	now := getNow(req.Now)
 
 	repo := s.Repository
 	if repo == nil {
-		return ListResult{}, fmt.Errorf("task note repository is required")
+		return ListResponse{}, fmt.Errorf("task note repository is required")
 	}
 
 	var notes []*tnmodel.TaskNote
@@ -78,7 +77,7 @@ func (s Service) List(ctx context.Context, req ListRequest) (ListResult, error) 
 		return nil
 	})
 	if err != nil {
-		return ListResult{}, fmt.Errorf("failed to crawl tasks: %w", err)
+		return ListResponse{}, fmt.Errorf("failed to crawl tasks: %w", err)
 	}
 
 	sort.Slice(notes, func(i, j int) bool {
@@ -88,7 +87,7 @@ func (s Service) List(ctx context.Context, req ListRequest) (ListResult, error) 
 	foundCount := len(notes)
 	notes = limitTaskNotes(notes, req.Limit)
 
-	return ListResult{
+	return ListResponse{
 		Notes:      notes,
 		FoundCount: foundCount,
 	}, nil
@@ -174,6 +173,115 @@ type CreateResponse struct {
 func (s Service) Create(ctx context.Context, req CreateRequest) (CreateResponse, error) {
 	now := getNow(req.Now)
 
+	if s.Repository == nil {
+		return CreateResponse{}, fmt.Errorf("task note repository is required")
+	}
+
+	// Parse the natural language input
 	parsed := s.Parser.ParseInput(req.NaturalLanguageInput)
-	
+
+	// Create the task note from parsed data
+	note := &tnmodel.TaskNote{
+		Frontmatter: tnmodel.TaskFrontmatter{
+			Title:        parsed.Title,
+			Status:       tnmodel.StatusOpen,
+			Tags:         append([]string{"task"}, parsed.Tags...),
+			Contexts:     parsed.Contexts,
+			Projects:     parsed.Projects,
+			DateCreated:  now,
+			DateModified: now,
+		},
+	}
+
+	// Set status if provided
+	if parsed.Status != "" {
+		note.Frontmatter.Status = parsed.Status
+	}
+
+	// Set priority if provided
+	if parsed.Priority != "" {
+		note.Frontmatter.Priority = &parsed.Priority
+	}
+
+	// Set due date if provided
+	if parsed.DueDate != "" {
+		dueDateTime := tnmodel.DateOrDateTime(parsed.DueDate)
+		if parsed.DueTime != "" {
+			dueDateTime = tnmodel.DateOrDateTime(parsed.DueDate + "T" + parsed.DueTime)
+		}
+		note.Frontmatter.Due = &dueDateTime
+	}
+
+	// Set scheduled date if provided
+	if parsed.ScheduledDate != "" {
+		scheduledDateTime := tnmodel.DateOrDateTime(parsed.ScheduledDate)
+		if parsed.ScheduledTime != "" {
+			scheduledDateTime = tnmodel.DateOrDateTime(parsed.ScheduledDate + "T" + parsed.ScheduledTime)
+		}
+		note.Frontmatter.Scheduled = &scheduledDateTime
+	}
+
+	// Set time estimate if provided
+	if parsed.Estimate > 0 {
+		note.Frontmatter.TimeEstimate = &parsed.Estimate
+	}
+
+	// Set recurrence if provided
+	if parsed.Recurrence != "" {
+		note.Frontmatter.Recurrence = &parsed.Recurrence
+	}
+
+	// Set details/body if provided
+	if parsed.Details != "" {
+		note.Body = &parsed.Details
+	}
+
+	// Generate a filename based on the title
+	filename := generateFilename(parsed.Title, now)
+	note.File = &tnmodel.TaskNoteFile{
+		Path: &filename,
+	}
+
+	// Save the task note
+	if err := s.Repository.Save(ctx, note); err != nil {
+		return CreateResponse{}, fmt.Errorf("failed to save task: %w", err)
+	}
+
+	return CreateResponse{
+		TaskNote: note,
+	}, nil
+}
+
+// generateFilename creates a safe filename from a task title and timestamp
+func generateFilename(title string, now time.Time) string {
+	// Use timestamp prefix to ensure uniqueness
+	timestamp := now.Format("20060102-150405")
+
+	// Sanitize the title for use in a filename
+	sanitized := strings.TrimSpace(title)
+	if sanitized == "" {
+		sanitized = "untitled"
+	}
+
+	// Replace unsafe characters
+	sanitized = strings.Map(func(r rune) rune {
+		if r == ' ' {
+			return '-'
+		}
+		if r == '/' || r == '\\' || r == ':' || r == '*' || r == '?' || r == '"' || r == '<' || r == '>' || r == '|' {
+			return '-'
+		}
+		return r
+	}, sanitized)
+
+	// Limit length
+	maxLen := 50
+	if len(sanitized) > maxLen {
+		sanitized = sanitized[:maxLen]
+	}
+
+	// Remove trailing dashes
+	sanitized = strings.TrimRight(sanitized, "-")
+
+	return fmt.Sprintf("tasks/%s-%s.md", timestamp, sanitized)
 }

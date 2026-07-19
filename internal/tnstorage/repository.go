@@ -10,9 +10,10 @@ import (
 	"github.com/robbert229/brain/internal/tnmodel"
 )
 
-// TaskNoteRepository provides access to TaskNotes.
-type TaskNoteRepository interface {
+// Repository provides access to TaskNotes.
+type Repository interface {
 	Crawl(ctx context.Context, fn func(*tnmodel.TaskNote) error) error
+	Save(ctx context.Context, note *tnmodel.TaskNote) error
 }
 
 // DiskTaskNoteRepository reads TaskNotes from a directory on disk.
@@ -20,11 +21,41 @@ type DiskTaskNoteRepository struct {
 	workingDirectory string
 }
 
-// NewDiskTaskNoteRepository creates a repository backed by workingDirectory.
-func NewDiskTaskNoteRepository(workingDirectory string) DiskTaskNoteRepository {
-	return DiskTaskNoteRepository{
-		workingDirectory: workingDirectory,
+type Config struct {
+	workingDirectory string
+}
+
+func (c Config) validate() error {
+	if c.workingDirectory == "" {
+		return fmt.Errorf("working directory is required")
 	}
+
+	return nil
+}
+
+type Option func(cfg *Config)
+
+func WithWorkingDirectory(workingDirectory string) Option {
+	return func(cfg *Config) {
+		cfg.workingDirectory = workingDirectory
+	}
+}
+
+// NewDiskTaskNoteRepository creates a repository backed by workingDirectory.
+func NewDiskTaskNoteRepository(opts ...Option) (DiskTaskNoteRepository, error) {
+	cfg := &Config{}
+
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
+	if err := cfg.validate(); err != nil {
+		return DiskTaskNoteRepository{}, err
+	}
+
+	return DiskTaskNoteRepository{
+		workingDirectory: cfg.workingDirectory,
+	}, nil
 }
 
 // Crawl crawls all notes in the repository's working directory.
@@ -128,4 +159,37 @@ func CoincidenceDetector(ctx context.Context, note *tnmodel.TaskNote) (bool, err
 	}
 
 	return true, nil
+}
+
+// Save writes a TaskNote to disk.
+func (repo DiskTaskNoteRepository) Save(ctx context.Context, note *tnmodel.TaskNote) error {
+	if note == nil {
+		return fmt.Errorf("note is required")
+	}
+
+	id := tnmodel.ID(note)
+	if id == "" {
+		return fmt.Errorf("note must have a file path")
+	}
+
+	path := filepath.Join(repo.workingDirectory, id)
+
+	// Ensure the directory exists
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create directory %q: %w", dir, err)
+	}
+
+	// Encode the note
+	content, err := tnmodel.Encode(note)
+	if err != nil {
+		return fmt.Errorf("encode note: %w", err)
+	}
+
+	// Write the file
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("write file %q: %w", path, err)
+	}
+
+	return nil
 }

@@ -19,7 +19,7 @@ const (
 )
 
 // PrintList prints out the response header and list of tasks.
-func PrintList(stdout io.Writer, req tnservice.ListRequest, result tnservice.ListResult) error {
+func PrintList(stdout io.Writer, req tnservice.ListRequest, result tnservice.ListResponse) error {
 	if req.JSON {
 		return printListJSON(stdout, req, result)
 	}
@@ -147,7 +147,7 @@ func DTOSFromTasks(notes []*tnmodel.TaskNote) []DTOTask {
 	return tasks
 }
 
-func printListJSON(stdout io.Writer, req tnservice.ListRequest, result tnservice.ListResult) error {
+func printListJSON(stdout io.Writer, req tnservice.ListRequest, result tnservice.ListResponse) error {
 	tasks := DTOSFromTasks(result.Notes)
 	sort.SliceStable(tasks, func(i, j int) bool {
 		return tasks[i].DateCreated > tasks[j].DateCreated
@@ -269,4 +269,83 @@ func formatTags(tags []string) string {
 func printf(stdout io.Writer, format string, args ...any) error {
 	_, err := fmt.Fprintf(stdout, format, args...)
 	return err
+}
+
+// PrintCreate prints out the created task.
+func PrintCreate(stdout io.Writer, result tnservice.CreateResponse) error {
+	note := result.TaskNote
+	if note == nil {
+		return fmt.Errorf("created task is nil")
+	}
+
+	if err := printf(stdout, "%s Task created successfully!\n\n", color.GreenString("✔")); err != nil {
+		return err
+	}
+
+	// Print task details
+	if err := printf(stdout, "%s %s\n", color.HiWhiteString("Title:"), tnmodel.Title(note)); err != nil {
+		return err
+	}
+
+	if tnmodel.Status(note) != "" {
+		if err := printf(stdout, "%s %s\n", color.HiWhiteString("Status:"), tnmodel.Status(note)); err != nil {
+			return err
+		}
+	}
+
+	if tnmodel.Priority(note) != "" {
+		if err := printf(stdout, "%s %s\n", color.HiWhiteString("Priority:"), tnmodel.Priority(note)); err != nil {
+			return err
+		}
+	}
+
+	if len(tnmodel.Tags(note)) > 0 {
+		if err := printf(stdout, "%s %s\n", color.HiWhiteString("Tags:"), formatTags(tnmodel.Tags(note))); err != nil {
+			return err
+		}
+	}
+
+	if len(note.Frontmatter.Contexts) > 0 {
+		if err := printf(stdout, "%s %s\n", color.HiWhiteString("Contexts:"), formatContexts(note.Frontmatter.Contexts)); err != nil {
+			return err
+		}
+	}
+
+	if len(note.Frontmatter.Projects) > 0 {
+		if err := printf(stdout, "%s %s\n", color.HiWhiteString("Projects:"), formatProjects(note.Frontmatter.Projects)); err != nil {
+			return err
+		}
+	}
+
+	if scheduled := tnmodel.Scheduled(note); scheduled != nil {
+		if err := printf(stdout, "%s %s\n", color.HiWhiteString("Scheduled:"), scheduled.Format(taskDateLayout)); err != nil {
+			return err
+		}
+	}
+
+	if due := tnmodel.Due(note); due != nil {
+		if err := printf(stdout, "%s %s\n", color.HiWhiteString("Due:"), due.Format(taskDateLayout)); err != nil {
+			return err
+		}
+	}
+
+	if err := printf(stdout, "%s %s\n", color.HiWhiteString("File:"), tnmodel.ID(note)); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func formatContexts(contexts []string) string {
+	if len(contexts) == 0 {
+		return ""
+	}
+	return "@" + strings.Join(contexts, " @")
+}
+
+func formatProjects(projects []string) string {
+	if len(projects) == 0 {
+		return ""
+	}
+	return "+" + strings.Join(projects, " +")
 }
