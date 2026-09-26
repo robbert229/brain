@@ -64,6 +64,7 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 
 ### FND-002 — Implement typed configuration loading
 
+- **Status:** Complete (2026-09-25).
 - **Deliverable:** One immutable configuration type for the documented `BRAIND_*` and OIDC settings, including duration/size parsing, defaults, cross-field validation, and redacted diagnostics.
 - **Depends on:** `FND-001`.
 - **Done when:** Table-driven tests cover valid defaults, required production values, malformed inputs, incompatible modes, and non-disclosure of secret values.

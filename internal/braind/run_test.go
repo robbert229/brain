@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/johnrowl/brain/internal/braind/config"
 )
 
 func TestHandlerHealthz(t *testing.T) {
@@ -153,6 +155,41 @@ func TestRunRejectsInvalidArguments(t *testing.T) {
 	}
 }
 
+func TestRunRejectsInvalidConfiguration(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := run(context.Background(), nil, "test", &stdout, &stderr, mapLookup(map[string]string{}))
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if !strings.Contains(stderr.String(), config.EnvOIDCClientSecret) {
+		t.Fatalf("configuration error did not identify missing setting: %q", stderr.String())
+	}
+}
+
+func TestRunUsesEnvironmentConfiguration(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	environment := map[string]string{
+		config.EnvListenAddr:       "127.0.0.1:0",
+		config.EnvOIDCEnabled:      "false",
+		config.EnvGitBackupEnabled: "false",
+	}
+
+	exitCode := run(ctx, nil, "test", &stdout, &stderr, mapLookup(environment))
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d: %s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "listening on 127.0.0.1:") {
+		t.Fatalf("startup output did not contain configured listener: %q", stdout.String())
+	}
+}
+
 func TestServeRejectsNonPositiveShutdownTimeout(t *testing.T) {
 	listener := listenOnLoopback(t)
 	defer listener.Close()
@@ -168,4 +205,11 @@ func listenOnLoopback(t *testing.T) net.Listener {
 		t.Fatalf("listen on loopback: %v", err)
 	}
 	return listener
+}
+
+func mapLookup(values map[string]string) config.LookupEnv {
+	return func(name string) (string, bool) {
+		value, ok := values[name]
+		return value, ok
+	}
 }
