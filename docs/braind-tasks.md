@@ -72,6 +72,7 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 
 ### FND-003 — Establish structured logging and request IDs
 
+- **Status:** Complete (2026-09-26).
 - **Deliverable:** Structured stdout/stderr logging, inbound/generated request IDs, component fields, and a central redaction policy.
 - **Depends on:** `FND-001`, `FND-002`.
 - **Done when:** Tests prove tokens, cookies, authorization headers, form bodies, note bodies, and configured secrets do not appear in representative logs.
