@@ -10,9 +10,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/johnrowl/brain/internal/braind/config"
+	"github.com/johnrowl/brain/internal/braind/logging"
 )
 
 const (
@@ -46,23 +48,50 @@ func run(ctx context.Context, args []string, version string, stdout, stderr io.W
 
 	processConfig, err := config.Load(lookup)
 	if err != nil {
-		fmt.Fprintf(stderr, "braind: configuration: %v\n", err)
+		bootstrapLogger, _ := logging.New(stdout, stderr, "info", rawLogSecrets(lookup)...)
+		bootstrapLogger.Error("invalid configuration", "component", "config", "error", err)
 		return 1
 	}
+
+	oidcConfig := processConfig.OIDC()
+	backupConfig := processConfig.Backup()
+	logger, err := logging.New(stdout, stderr, processConfig.LogLevel(), oidcConfig.ClientSecret, backupConfig.RemoteURL)
+	if err != nil {
+		fmt.Fprintf(stderr, "braind: logging: %v\n", err)
+		return 1
+	}
+	serverLogger := logger.With("component", "server")
 
 	listener, err := net.Listen("tcp", processConfig.Server().ListenAddr)
 	if err != nil {
-		fmt.Fprintf(stderr, "braind: listen: %v\n", err)
+		serverLogger.Error("listener failed", "error", err)
 		return 1
 	}
 
-	fmt.Fprintf(stdout, "braind %s listening on %s\n", version, listener.Addr())
-	if err := Serve(ctx, listener, Handler(), defaultShutdownTimeout); err != nil {
-		fmt.Fprintf(stderr, "braind: serve: %v\n", err)
+	serverLogger.Info("server listening", "version", version, "address", listener.Addr().String())
+	if err := Serve(ctx, listener, logging.HTTPMiddleware(logger, Handler()), defaultShutdownTimeout); err != nil {
+		serverLogger.Error("server stopped with error", "error", err)
 		return 1
 	}
+	serverLogger.Info("server stopped")
 
 	return 0
+}
+
+func rawLogSecrets(lookup config.LookupEnv) []string {
+	if lookup == nil {
+		return nil
+	}
+	secrets := make([]string, 0, 4)
+	for _, name := range []string{config.EnvOIDCClientSecret, config.EnvGitRemoteURL} {
+		if value, ok := lookup(name); ok && value != "" {
+			secrets = append(secrets, value)
+			if trimmed := strings.TrimSpace(value); trimmed != value && trimmed != "" {
+				secrets = append(secrets, trimmed)
+			}
+		}
+	}
+	return secrets
 }
 
 // Handler returns the daemon's HTTP handler. FND-001 deliberately exposes

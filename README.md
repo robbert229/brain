@@ -42,6 +42,10 @@ command disables those not-yet-implemented subsystems. Production startup
 requires the corresponding settings documented in
 [`docs/braind.md`](docs/braind.md#configuration-contract).
 
+Runtime logs are newline-delimited JSON. HTTP responses echo a valid inbound
+`X-Request-ID` or contain a generated one; the same value appears in the
+request-completion log record.
+
 ## Test
 
 ```bash

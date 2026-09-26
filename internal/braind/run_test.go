@@ -169,6 +169,24 @@ func TestRunRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
+func TestRunConfigurationLogDoesNotDiscloseConfiguredSecrets(t *testing.T) {
+	const secret = "invalid-configuration-client-secret"
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	environment := map[string]string{
+		config.EnvOIDCClientSecret: secret,
+	}
+
+	exitCode := run(context.Background(), nil, "test", &stdout, &stderr, mapLookup(environment))
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if strings.Contains(stderr.String(), secret) || strings.Contains(stdout.String(), secret) {
+		t.Fatalf("configuration log disclosed secret: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestRunUsesEnvironmentConfiguration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -185,7 +203,7 @@ func TestRunUsesEnvironmentConfiguration(t *testing.T) {
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d: %s", exitCode, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "listening on 127.0.0.1:") {
+	if !strings.Contains(stdout.String(), `"msg":"server listening"`) || !strings.Contains(stdout.String(), `"address":"127.0.0.1:`) {
 		t.Fatalf("startup output did not contain configured listener: %q", stdout.String())
 	}
 }
