@@ -31,6 +31,9 @@ go run ./cmd/brain --version
 Run the daemon:
 
 ```bash
+BRAIND_DATA_PATH=/tmp/braind-data \
+BRAIND_VAULT_PATH=/tmp/braind-data/vault \
+BRAIND_GIT_DIR=/tmp/braind-data/git/vault.git \
 OIDC_ENABLED=false BRAIND_GIT_BACKUP_ENABLED=false go run ./cmd/braind
 curl http://127.0.0.1:8080/healthz
 ```
@@ -45,6 +48,9 @@ requires the corresponding settings documented in
 Runtime logs are newline-delimited JSON. HTTP responses echo a valid inbound
 `X-Request-ID` or contain a generated one; the same value appears in the
 request-completion log record.
+
+Only one daemon may own a data root at a time. `braind` holds an advisory lock
+at `<BRAIND_DATA_PATH>/braind.lock` until graceful shutdown or process exit.
 
 ## Test
 
