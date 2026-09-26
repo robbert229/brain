@@ -9,11 +9,13 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"time"
+
+	"github.com/johnrowl/brain/internal/braind/config"
 )
 
 const (
-	defaultListenAddress   = "0.0.0.0:8080"
 	defaultShutdownTimeout = 5 * time.Second
 	readHeaderTimeout      = 5 * time.Second
 )
@@ -21,10 +23,13 @@ const (
 // Run parses command-line arguments, listens for HTTP requests, and blocks
 // until the context is canceled or the server fails.
 func Run(ctx context.Context, args []string, version string, stdout, stderr io.Writer) int {
+	return run(ctx, args, version, stdout, stderr, os.LookupEnv)
+}
+
+func run(ctx context.Context, args []string, version string, stdout, stderr io.Writer, lookup config.LookupEnv) int {
 	fs := flag.NewFlagSet("braind", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	listenAddress := fs.String("listen", defaultListenAddress, "HTTP listen address")
 	showVersion := fs.Bool("version", false, "print version")
 
 	if err := fs.Parse(args); err != nil {
@@ -39,7 +44,13 @@ func Run(ctx context.Context, args []string, version string, stdout, stderr io.W
 		return 0
 	}
 
-	listener, err := net.Listen("tcp", *listenAddress)
+	processConfig, err := config.Load(lookup)
+	if err != nil {
+		fmt.Fprintf(stderr, "braind: configuration: %v\n", err)
+		return 1
+	}
+
+	listener, err := net.Listen("tcp", processConfig.Server().ListenAddr)
 	if err != nil {
 		fmt.Fprintf(stderr, "braind: listen: %v\n", err)
 		return 1
