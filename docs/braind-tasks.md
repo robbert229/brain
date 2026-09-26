@@ -79,6 +79,7 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 
 ### FND-004 — Add the process-wide data lock and lifecycle state
 
+- **Status:** Complete (2026-09-26).
 - **Deliverable:** The `/data/braind.lock` exclusive lock plus startup, running, degraded, and shutting-down state transitions shared by probes and status handlers.
 - **Depends on:** `FND-002`, `FND-003`.
 - **Done when:** A second process/fixture cannot acquire the same data root, shutdown makes readiness fail before exit, and stale ordinary process termination releases the lock.

@@ -3,6 +3,7 @@ package braind
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/johnrowl/brain/internal/braind/config"
+	"github.com/johnrowl/brain/internal/braind/datalock"
+	"github.com/johnrowl/brain/internal/braind/lifecycle"
 )
 
 func TestHandlerHealthz(t *testing.T) {
@@ -192,19 +195,98 @@ func TestRunUsesEnvironmentConfiguration(t *testing.T) {
 	cancel()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	environment := map[string]string{
-		config.EnvListenAddr:       "127.0.0.1:0",
-		config.EnvOIDCEnabled:      "false",
-		config.EnvGitBackupEnabled: "false",
-	}
+	environment := localEnvironment(t)
 
 	exitCode := run(ctx, nil, "test", &stdout, &stderr, mapLookup(environment))
 
+	if strings.Contains(stderr.String(), datalock.ErrUnsupported.Error()) {
+		t.Skip(datalock.ErrUnsupported)
+	}
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d: %s", exitCode, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), `"msg":"server listening"`) || !strings.Contains(stdout.String(), `"address":"127.0.0.1:`) {
 		t.Fatalf("startup output did not contain configured listener: %q", stdout.String())
+	}
+	reacquired, err := datalock.Acquire(environment[config.EnvDataPath])
+	if err != nil {
+		t.Fatalf("data lock was not released after shutdown: %v", err)
+	}
+	if err := reacquired.Release(); err != nil {
+		t.Fatalf("release reacquired data lock: %v", err)
+	}
+}
+
+func TestRunRejectsLockedDataRoot(t *testing.T) {
+	environment := localEnvironment(t)
+	lock, err := datalock.Acquire(environment[config.EnvDataPath])
+	if errors.Is(err, datalock.ErrUnsupported) {
+		t.Skip(err)
+	}
+	if err != nil {
+		t.Fatalf("acquire fixture lock: %v", err)
+	}
+	t.Cleanup(func() { _ = lock.Release() })
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := run(context.Background(), nil, "test", &stdout, &stderr, mapLookup(environment))
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if !strings.Contains(stderr.String(), datalock.ErrAlreadyLocked.Error()) {
+		t.Fatalf("lock failure was not reported: %q", stderr.String())
+	}
+}
+
+func TestServeBeginsShutdownBeforeDrainingRequests(t *testing.T) {
+	listener := listenOnLoopback(t)
+	processLifecycle := lifecycle.New()
+	if err := processLifecycle.MarkRunning(); err != nil {
+		t.Fatalf("mark lifecycle running: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		close(requestStarted)
+		<-releaseRequest
+		writer.WriteHeader(http.StatusNoContent)
+	})
+	done := make(chan error, 1)
+	go func() {
+		done <- serve(ctx, listener, handler, time.Second, processLifecycle.BeginShutdown)
+	}()
+	requestDone := make(chan struct{})
+	go func() {
+		defer close(requestDone)
+		response, err := (&http.Client{Timeout: 2 * time.Second}).Get("http://" + listener.Addr().String())
+		if err == nil {
+			_ = response.Body.Close()
+		}
+	}()
+	<-requestStarted
+	cancel()
+
+	deadline := time.Now().Add(time.Second)
+	for processLifecycle.Snapshot().State != lifecycle.ShuttingDown && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	snapshot := processLifecycle.Snapshot()
+	if snapshot.State != lifecycle.ShuttingDown || snapshot.Ready {
+		t.Fatalf("shutdown did not immediately fail readiness: %+v", snapshot)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("server exited before in-flight request drained: %v", err)
+	default:
+	}
+
+	close(releaseRequest)
+	<-requestDone
+	if err := <-done; err != nil {
+		t.Fatalf("serve after graceful shutdown: %v", err)
 	}
 }
 
@@ -229,5 +311,18 @@ func mapLookup(values map[string]string) config.LookupEnv {
 	return func(name string) (string, bool) {
 		value, ok := values[name]
 		return value, ok
+	}
+}
+
+func localEnvironment(t *testing.T) map[string]string {
+	t.Helper()
+	dataRoot := t.TempDir()
+	return map[string]string{
+		config.EnvListenAddr:       "127.0.0.1:0",
+		config.EnvDataPath:         dataRoot,
+		config.EnvVaultPath:        dataRoot + "/vault",
+		config.EnvGitDir:           dataRoot + "/git/vault.git",
+		config.EnvOIDCEnabled:      "false",
+		config.EnvGitBackupEnabled: "false",
 	}
 }

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/johnrowl/brain/internal/braind/config"
+	"github.com/johnrowl/brain/internal/braind/datalock"
+	"github.com/johnrowl/brain/internal/braind/lifecycle"
 	"github.com/johnrowl/brain/internal/braind/logging"
 )
 
@@ -28,7 +30,7 @@ func Run(ctx context.Context, args []string, version string, stdout, stderr io.W
 	return run(ctx, args, version, stdout, stderr, os.LookupEnv)
 }
 
-func run(ctx context.Context, args []string, version string, stdout, stderr io.Writer, lookup config.LookupEnv) int {
+func run(ctx context.Context, args []string, version string, stdout, stderr io.Writer, lookup config.LookupEnv) (exitCode int) {
 	fs := flag.NewFlagSet("braind", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -61,6 +63,19 @@ func run(ctx context.Context, args []string, version string, stdout, stderr io.W
 		return 1
 	}
 	serverLogger := logger.With("component", "server")
+	processLifecycle := lifecycle.New()
+
+	dataLock, err := datalock.Acquire(processConfig.Vault().DataPath)
+	if err != nil {
+		serverLogger.Error("data lock failed", "error", err)
+		return 1
+	}
+	defer func() {
+		if err := dataLock.Release(); err != nil {
+			serverLogger.Error("data lock release failed", "error", err)
+			exitCode = 1
+		}
+	}()
 
 	listener, err := net.Listen("tcp", processConfig.Server().ListenAddr)
 	if err != nil {
@@ -68,8 +83,12 @@ func run(ctx context.Context, args []string, version string, stdout, stderr io.W
 		return 1
 	}
 
+	if err := processLifecycle.MarkRunning(); err != nil {
+		serverLogger.Error("lifecycle transition failed", "error", err)
+		return 1
+	}
 	serverLogger.Info("server listening", "version", version, "address", listener.Addr().String())
-	if err := Serve(ctx, listener, logging.HTTPMiddleware(logger, Handler()), defaultShutdownTimeout); err != nil {
+	if err := serve(ctx, listener, logging.HTTPMiddleware(logger, Handler()), defaultShutdownTimeout, processLifecycle.BeginShutdown); err != nil {
 		serverLogger.Error("server stopped with error", "error", err)
 		return 1
 	}
@@ -110,6 +129,10 @@ func Handler() http.Handler {
 // Serve runs an HTTP server on listener. Canceling ctx begins graceful
 // shutdown; connections are forcibly closed if the deadline expires.
 func Serve(ctx context.Context, listener net.Listener, handler http.Handler, shutdownTimeout time.Duration) error {
+	return serve(ctx, listener, handler, shutdownTimeout, nil)
+}
+
+func serve(ctx context.Context, listener net.Listener, handler http.Handler, shutdownTimeout time.Duration, beginShutdown func() bool) error {
 	if shutdownTimeout <= 0 {
 		return errors.New("shutdown timeout must be positive")
 	}
@@ -125,8 +148,10 @@ func Serve(ctx context.Context, listener net.Listener, handler http.Handler, shu
 
 	select {
 	case err := <-serveErr:
+		callBeginShutdown(beginShutdown)
 		return normalizeServeError(err)
 	case <-ctx.Done():
+		callBeginShutdown(beginShutdown)
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		err := server.Shutdown(shutdownCtx)
 		cancel()
@@ -139,6 +164,12 @@ func Serve(ctx context.Context, listener net.Listener, handler http.Handler, shu
 		}
 
 		return normalizeServeError(<-serveErr)
+	}
+}
+
+func callBeginShutdown(beginShutdown func() bool) {
+	if beginShutdown != nil {
+		beginShutdown()
 	}
 }
 
