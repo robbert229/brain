@@ -2,7 +2,7 @@
 
 Status: active execution plan
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, independently reviewable deliverables. A task should normally fit in one pull request, preserve a passing main branch, include its own tests and documentation, and avoid depending on unfinished code hidden in another branch.
 
@@ -37,6 +37,7 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 
 ### SPK-002 — Verify Pocket ID claims against the deployed provider
 
+- **Status:** Complete; sanitized live evidence is recorded in [`docs/spikes/spk-002-pocket-id.md`](spikes/spk-002-pocket-id.md), and the temporary public client was removed after verification.
 - **Deliverable:** A sanitized verification note showing discovery issuer, Authorization Code + PKCE behavior, `groups` in the ID token and UserInfo, email display claim, logout behavior, and the three configured Brain groups.
 - **Depends on:** none.
 - **Done when:** A disposable client proves exact claim shapes without committing tokens, codes, client secrets, or personal group memberships.
