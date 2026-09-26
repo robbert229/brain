@@ -2,7 +2,7 @@
 
 Status: proposed design; no implementation exists yet
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 ## 1. Summary
 
@@ -481,6 +481,8 @@ For Pocket ID, the selected defaults are:
 - Pocket ID Allowed User Groups restricted to `access-brain-admin`, `access-brain-user`, and `access-brain-viewer` as defense in depth.
 
 Pocket ID documents that requesting the `groups` scope returns a string array in both the ID token and UserInfo. Using the ID token avoids an extra request while retaining `OIDC_GROUPS_SOURCE=userinfo` as a tested fallback. `braind` still performs its own group-to-role mapping; Pocket ID's Allowed User Groups gate only determines who may authenticate to the client.
+
+This behavior was verified live against Pocket ID 2.16.0 on 2026-09-26 with a disposable public S256-PKCE client: Authorization Code exchange, RS256 validation, string `email`, string-array `groups`, exact equality of the ID-token and UserInfo group sets, the expected `access-brain-admin` membership, and the discovered logout callback all passed. The public client was used only to avoid handling a spike client secret and was removed after verification; production remains a confidential client with S256 PKCE. See [`docs/spikes/spk-002-pocket-id.md`](spikes/spk-002-pocket-id.md).
 
 OIDC is mandatory in production. A development-only authentication bypass may exist for local automated tests, but it must require an explicit development build/runtime switch, refuse to start when the canonical external URL is non-loopback, and never appear in the Kubernetes manifest.
 
