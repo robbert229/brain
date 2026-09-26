@@ -86,6 +86,7 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 
 ### FND-005 — Implement the status snapshot model
 
+- **Status:** Complete (2026-09-26).
 - **Deliverable:** A concurrency-safe immutable status snapshot with build, vault, OIDC, Sync, and Git-backup substate, initially populated by fakes/placeholders.
 - **Depends on:** `FND-004`.
 - **Done when:** Race-enabled tests cover concurrent readers/writers and public status serialization cannot expose secret fields.

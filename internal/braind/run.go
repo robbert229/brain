@@ -17,6 +17,7 @@ import (
 	"github.com/johnrowl/brain/internal/braind/datalock"
 	"github.com/johnrowl/brain/internal/braind/lifecycle"
 	"github.com/johnrowl/brain/internal/braind/logging"
+	"github.com/johnrowl/brain/internal/braind/status"
 )
 
 const (
@@ -31,6 +32,7 @@ func Run(ctx context.Context, args []string, version string, stdout, stderr io.W
 }
 
 func run(ctx context.Context, args []string, version string, stdout, stderr io.Writer, lookup config.LookupEnv) (exitCode int) {
+	startedAt := time.Now()
 	fs := flag.NewFlagSet("braind", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
@@ -64,6 +66,11 @@ func run(ctx context.Context, args []string, version string, stdout, stderr io.W
 	}
 	serverLogger := logger.With("component", "server")
 	processLifecycle := lifecycle.New()
+	statusStore := status.New(
+		status.Initial(version, "", processConfig, processLifecycle.Snapshot(), startedAt),
+		oidcConfig.ClientSecret,
+		backupConfig.RemoteURL,
+	)
 
 	dataLock, err := datalock.Acquire(processConfig.Vault().DataPath)
 	if err != nil {
@@ -87,8 +94,14 @@ func run(ctx context.Context, args []string, version string, stdout, stderr io.W
 		serverLogger.Error("lifecycle transition failed", "error", err)
 		return 1
 	}
+	statusStore.SetLifecycle(processLifecycle.Snapshot())
+	beginShutdown := func() bool {
+		changed := processLifecycle.BeginShutdown()
+		statusStore.SetLifecycle(processLifecycle.Snapshot())
+		return changed
+	}
 	serverLogger.Info("server listening", "version", version, "address", listener.Addr().String())
-	if err := serve(ctx, listener, logging.HTTPMiddleware(logger, Handler()), defaultShutdownTimeout, processLifecycle.BeginShutdown); err != nil {
+	if err := serve(ctx, listener, logging.HTTPMiddleware(logger, Handler()), defaultShutdownTimeout, beginShutdown); err != nil {
 		serverLogger.Error("server stopped with error", "error", err)
 		return 1
 	}
