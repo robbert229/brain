@@ -9,6 +9,8 @@ process liveness and graceful shutdown.
 ## Prerequisites
 
 - Go 1.22+
+- [`ko`](https://ko.build/) v0.19.1 and Docker when building or smoke-testing
+  the bootstrap container
 
 ## Quick start
 
@@ -57,3 +59,29 @@ at `<BRAIND_DATA_PATH>/braind.lock` until graceful shutdown or process exit.
 ```bash
 go test ./...
 ```
+
+## Bootstrap container
+
+DEP-001 provides a temporary, pure-Go image so the current daemon can be
+deployed before its Obsidian runtime is ready. Build and exercise the image on
+the local Docker daemon with:
+
+```bash
+make image-smoke
+```
+
+To publish the `linux/amd64` and `linux/arm64` OCI index manually:
+
+```bash
+KO_DOCKER_REPO=ghcr.io/robbert229/braind \
+IMAGE_TAG="sha-$(git rev-parse HEAD)" \
+make image-publish
+```
+
+The GitHub workflow publishes the same private GHCR package after relevant
+changes land on `main`, records the immutable digest in its job summary, and
+also updates the temporary `latest` tag. Repository/package visibility must
+remain private. The image is non-root, has a read-only-root smoke test, and
+contains only `braind` plus CA data. It deliberately does **not** contain Node,
+Obsidian Headless, Git, or SSH; `IMG-001` and `IMG-002` replace this bootstrap
+base before Sync or backup is enabled.
