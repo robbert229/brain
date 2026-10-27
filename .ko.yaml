@@ -1,0 +1,18 @@
+# DEP-001 bootstrap image only. IMG-002 will replace this base with the
+# pinned Node/Obsidian/Git runtime produced by IMG-001.
+defaultBaseImage: gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+defaultPlatforms:
+  - linux/amd64
+  - linux/arm64
+defaultEnv:
+  - CGO_ENABLED=0
+builds:
+  - id: braind
+    dir: .
+    main: ./cmd/braind
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X main.version={{.Git.ShortCommit}}

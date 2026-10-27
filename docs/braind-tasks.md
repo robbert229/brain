@@ -21,6 +21,7 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 | Milestone | Outcome | Required tasks |
 | --- | --- | --- |
 | M0 — contracts proven | The external tools and packaging model are sufficiently understood to build against. | `SPK-001`–`SPK-004` |
+| M0.5 — bootstrap deployed | The foundation daemon is available through the target cluster while product features are built. | `DEP-001`–`DEP-003` |
 | M1 — local secure reader | An OIDC-protected local daemon can browse, read, render, and search a vault through HTML and `/api/v1`. | `FND-001`–`FND-006`, `AUTH-001`–`AUTH-005`, `READ-001`–`READ-007` |
 | M2 — synchronized and backed up | The daemon supervises Obsidian Sync, bootstraps without normal `kubectl exec`, and pushes coherent Git backups. | `SYNC-001`–`SYNC-006`, `GIT-001`–`GIT-006` |
 | M3 — deployable | A private, multi-platform image and validated k3s manifests deploy the M2 service. | `IMG-001`–`IMG-003`, `K8S-001`–`K8S-005` |
@@ -249,7 +250,33 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 - **Depends on:** `GIT-004`, `READ-002`, `READ-003`.
 - **Done when:** The restored repository passes integrity, file-count, representative note/search, and binary checksum checks, and the procedure never overwrites the live vault.
 
-## 9. Images and Kubernetes deployment
+## 9. Bootstrap deployment slice
+
+These tasks intentionally provide an early, disposable deployment of the
+foundation daemon. They do not replace the production runtime and deployment
+tasks below. Sync, Git backup, and OIDC stay disabled until their corresponding
+features are implemented.
+
+### DEP-001 — Publish the pure-Go bootstrap image
+
+- **Status:** In progress; implementation complete, CI publication pending.
+- **Deliverable:** A pinned `ko` configuration, local read-only/non-root health smoke test, and GitHub workflow that publishes the current `braind` daemon as a private GHCR OCI index for `linux/amd64` and `linux/arm64`.
+- **Depends on:** `FND-005`.
+- **Done when:** A clean checkout passes Go tests, builds and health-checks the bootstrap image locally, and CI can publish immutable-revision and temporary `latest` references while recording the resulting digest. The documentation clearly excludes Node, Obsidian Headless, Git, and SSH from this temporary artifact.
+
+### DEP-002 — Add bootstrap Kubernetes manifests
+
+- **Deliverable:** Namespace, one-replica StatefulSet, retained Longhorn claim, ClusterIP Service, Traefik Ingress, and cert-manager TLS configuration for the health-only bootstrap deployment.
+- **Depends on:** `DEP-001`.
+- **Done when:** The manifests use `brain`, `brain.lab.johnrowley.co`, `letsencrypt-cloudflaredns-production`, and `regcred`; disable incomplete integrations; contain no credential values; and pass local policy checks plus target-cluster server-side dry-run.
+
+### DEP-003 — Deploy and verify the bootstrap service
+
+- **Deliverable:** A recorded target-cluster smoke procedure and sanitized results for image pull, TLS routing, liveness, PVC mounting, data locking, and pod restart persistence.
+- **Depends on:** `DEP-002`.
+- **Done when:** `https://brain.lab.johnrowley.co/healthz` responds successfully, the pod runs non-root with its intended volume, and deleting the pod demonstrates recovery on the same claim. This task does not enable OIDC, Sync, or Git backup.
+
+## 10. Images and Kubernetes deployment
 
 ### IMG-001 — Define the pinned runtime base image
 
@@ -299,7 +326,7 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 - **Depends on:** `IMG-003`, `K8S-002`, `K8S-003`, `K8S-004`, `GIT-006`, `SYNC-006`.
 - **Done when:** The procedure passes on the target k3s/Longhorn environment without normal `kubectl exec`, and sanitized evidence is retained.
 
-## 10. Safe mutation milestone
+## 11. Safe mutation milestone
 
 ### MUT-001 — Implement atomic create/update primitives
 
@@ -325,7 +352,7 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 - **Depends on:** `MUT-001`, `MUT-003`, `READ-007`.
 - **Done when:** Conformance tests cover `201`, `409`, `412`, `428`, validation, role denial, read-only/sync-drift denial, and parity with web business rules.
 
-## 11. Operational hardening
+## 12. Operational hardening
 
 ### OPS-001 — Add privacy-safe metrics
 
@@ -351,7 +378,7 @@ This backlog decomposes the design in [`docs/braind.md`](braind.md) into small, 
 - **Depends on:** `OPS-001`, `OPS-002`, `OPS-003`; include mutation tasks only if M4 is in the release.
 - **Done when:** Every open design question is resolved or explicitly deferred, all milestone acceptance tests pass, and the release artifact/manifests are immutable and private.
 
-## 12. Recommended starting sequence
+## 13. Recommended starting sequence
 
 The first four deliverables can begin independently except where noted:
 

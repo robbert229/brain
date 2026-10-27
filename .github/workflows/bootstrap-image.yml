@@ -1,0 +1,92 @@
+name: Bootstrap container image
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/bootstrap-image.yml
+      - .ko.yaml
+      - cmd/braind/**
+      - internal/braind/**
+      - Makefile
+      - go.mod
+      - go.sum
+      - scripts/smoke-bootstrap-image.sh
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/bootstrap-image.yml
+      - .ko.yaml
+      - cmd/braind/**
+      - internal/braind/**
+      - Makefile
+      - go.mod
+      - go.sum
+      - scripts/smoke-bootstrap-image.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bootstrap-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up ko
+        uses: ko-build/setup-ko@v0.10
+        with:
+          version: v0.19.1
+
+      - name: Test
+        run: make test
+
+      - name: Smoke-test bootstrap image
+        run: make image-smoke
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up ko
+        uses: ko-build/setup-ko@v0.10
+        with:
+          version: v0.19.1
+
+      - name: Publish private multi-platform image
+        env:
+          IMAGE_TAG: sha-${{ github.sha }}
+          KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/braind
+        run: make image-publish
+
+      - name: Record immutable image reference
+        run: cat image-ref.txt >> "$GITHUB_STEP_SUMMARY"

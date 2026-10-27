@@ -781,6 +781,14 @@ Running the container with a read-only root filesystem is desirable. Writable lo
 
 Using [`ko`](https://ko.build/) makes sense for `braind`: the application is a Go command, the deployment is Kubernetes-first, and `ko` can compile the binary, publish an OCI image, generate an SPDX SBOM, and replace a `ko://` image reference in Kubernetes YAML with an immutable digest.
 
+Before the complete runtime exists, DEP-001 builds a bootstrap image from the
+pure-Go daemon using a digest-pinned distroless non-root base. Its sole purpose
+is to exercise GHCR and the target Kubernetes path early. It contains no Node,
+Obsidian Headless, Git, or SSH, and deployments of it must explicitly disable
+OIDC, Sync, and Git backup. The bootstrap image is not the runtime-base spike
+or the production image described below and is replaced rather than extended
+when `IMG-001` and `IMG-002` land.
+
 There is one important qualification. A normal `ko` image is ideal for a self-contained Go binary, while `braind` also needs Node.js 22 and the `obsidian-headless` npm package. `ko` does not run arbitrary package-install steps while assembling the application layer. The preferred design is therefore:
 
 1. Build a small, separately maintained runtime base image containing Node.js 22+, Git and SSH clients, CA certificates, the exact pinned `obsidian-headless` version, its license material, the fixed non-root user, and no `braind` binary.
