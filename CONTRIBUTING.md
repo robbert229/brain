@@ -1,7 +1,6 @@
 # Contributing
 
-This document records the conventions this project follows. It is a stub
-and will grow as conventions are established.
+This document records the conventions this project follows.
 
 ## Commit messages
 
@@ -25,8 +24,17 @@ breaking change:
 
     feat(api)!: rename note endpoints
 
-This convention is not currently enforced by tooling or CI; it is a
-project-wide convention and applies to all commits.
+CI checks every pull request commit and its title. Squash-merge pull request
+titles should follow the same format because the title becomes the commit on
+`main` and Release Please uses Conventional Commits to prepare releases.
+
+## Releases
+
+Release Please maintains a draft release pull request from changes merged to
+`main`. Merge that pull request to create a `vX.Y.Z` tag and draft GitHub
+release. The same workflow run builds the matching private, multi-platform
+`braind` image in GHCR. See [the release guide](docs/release.md) for the
+publication and retry flow.
 
 ## Before opening a pull request
 

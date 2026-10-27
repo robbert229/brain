@@ -1,0 +1,47 @@
+name: commit conventions
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commit-conventions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commits:
+    name: Lint commit messages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Lint every commit added by this pull request
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          npx --yes \
+            --package @commitlint/cli@21.2.3 \
+            --package @commitlint/config-conventional@21.2.3 \
+            -- commitlint --config ./commitlint.config.js \
+                 --from "$BASE" --to "$HEAD"
+
+  pr-title:
+    name: Lint pull request title
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint the pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          printf '%s\n' "$PR_TITLE" | \
+            npx --yes \
+              --package @commitlint/cli@21.2.3 \
+              --package @commitlint/config-conventional@21.2.3 \
+              -- commitlint --config ./commitlint.config.js

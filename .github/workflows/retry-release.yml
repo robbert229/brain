@@ -1,0 +1,48 @@
+name: Retry release publication
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Existing Release Please tag to publish, for example v0.1.0
+        required: true
+        type: string
+      source_sha:
+        description: Optional expected commit SHA for the tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ inputs.tag_name }}
+      source_sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve and validate tag
+        id: resolve
+        env:
+          TAG_NAME: ${{ inputs.tag_name }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          sha="$(git rev-parse "refs/tags/$TAG_NAME^{commit}")"
+          if [ -n "$SOURCE_SHA" ]; then test "$sha" = "$SOURCE_SHA"; fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: resolve
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish-release.yml
+    with:
+      tag_name: ${{ needs.resolve.outputs.tag_name }}
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
