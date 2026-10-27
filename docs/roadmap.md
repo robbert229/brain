@@ -9,6 +9,7 @@ choices are recorded in [`adr/`](adr/).
 | Stage | Feature specs | Status / dependency |
 | --- | --- | --- |
 | Foundation | [001 Daemon foundation](../specs/001-daemon-foundation/spec.md) | FND-001–FND-005 are implemented; readiness work remains. |
+| Foundation (web) | [009 Landing page](../specs/009-landing-page/spec.md) | Implemented (2026-10-26); serves the landing page and HTMX assets at the daemon root. |
 | First usable milestone | [002 OIDC access](../specs/002-oidc-access/spec.md), [003 Vault reading](../specs/003-vault-reading/spec.md) | Planned. |
 | Sync and recovery | [004 Obsidian Sync](../specs/004-obsidian-sync/spec.md), [005 Git backup](../specs/005-git-backup/spec.md) | Planned; validate Obsidian command behavior and resolve backup decisions first. |
 | Private deployment | [007 Private deployment](../specs/007-private-deployment/spec.md) | Planned; depends on successful image/runtime and cluster validation. |

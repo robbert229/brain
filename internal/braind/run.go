@@ -126,8 +126,8 @@ func rawLogSecrets(lookup config.LookupEnv) []string {
 	return secrets
 }
 
-// Handler returns the daemon's HTTP handler. FND-001 deliberately exposes
-// only process liveness; readiness and application routes are later tasks.
+// Handler returns the daemon's HTTP handler. FND-001 exposes process liveness;
+// the landing page (spec 009) is served at the root and its assets under /static/.
 func Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -136,6 +136,10 @@ func Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ok\n")
 	})
+	mux.Handle("GET /static/", http.StripPrefix("/static/", staticAssetsHandler()))
+	// "GET /{$}" matches only the exact root path so unknown paths keep
+	// returning 404 (contracts/http.md; run_test.go rejection cases).
+	mux.HandleFunc("GET /{$}", serveLanding)
 	return mux
 }
 

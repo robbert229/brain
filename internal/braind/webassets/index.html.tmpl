@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.ProductName}}: {{.Tagline}}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <main id="main">
+    <header>
+      <h1>{{.ProductName}}</h1>
+      <p class="tagline">{{.Tagline}}</p>
+    </header>
+    <p class="description">{{.Description}}</p>
+    <section class="status" aria-labelledby="status-heading">
+      <h2 id="status-heading">Status</h2>
+      <p>{{.ConstructionNotice}}</p>
+    </section>
+  </main>
+  <script src="/static/htmx.min.js"></script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+# HTTP Contract: Landing Page (served by `braind`)
+
+**Feature**: [spec.md](../spec.md) | **Date**: 2026-10-26
+
+Baseline: `braind` already serves `GET /healthz` (Application HTTP surface from
+FND-001). This contract adds the root route and a static-asset prefix without changing
+the existing surface.
+
+## Routes
+
+| Method | Path | Status | Content-Type | Body / Notes |
+| --- | --- | --- | --- | --- |
+| `GET` | `/` | `200 OK` | `text/html; charset=utf-8` | Landing page. MUST contain the product name `brain`, the exact tagline `a second brain, powered by markdown`, and the under-construction notice. Headers: `Cache-Control: public, max-age=3600`; `Content-Security-Policy: default-src 'self'`. |
+| `GET` | `/static/style.css` | `200 OK` | `text/css; charset=utf-8` | Embedded stylesheet. |
+| `GET` | `/static/htmx.min.js` | `200 OK` | `text/javascript; charset=utf-8` | Embedded, vendored htmx `2.0.11`. |
+| `GET` | `/healthz` | `200 OK` | `text/plain; charset=utf-8` | Unchanged: body `ok\n`, `Cache-Control: no-store`. |
+| any | `/` (other methods) | `405 Method Not Allowed` | — | Only `GET` is registered on `/`. |
+| `GET` | any other path | `404 Not Found` | — | Existing behavior preserved (e.g., `/readyz` → 404). |
+
+## Response guarantees
+
+1. **Server-rendered**: every word of the page content is present in the initial HTML
+   response; the page is fully readable with client-side scripting disabled (FR-003,
+   SC-003).
+2. **Privacy-safe**: no response contains note content, note paths, credentials,
+   tokens, or operational details (FR-005, SC-005).
+3. **Availability**: the page is static; it renders without reading the vault or any
+   optional subsystem and remains available during their outages (FR-006).
+4. **No regressions**: `/healthz` behavior and 404/405 semantics are unchanged
+   (FR-007, SC-006).
+5. **No external network**: the page and its assets load entirely from `braind`
+   (CSP `default-src 'self'`).
+
+## Caching model
+
+- Landing page: `Cache-Control: public, max-age=3600` (static copy, safe to cache briefly).
+- Static assets: `Cache-Control: public, max-age=3600` with correct content types.
+- `/healthz`: `Cache-Control: no-store` (operational — unchanged).
+
+## Verification mapping
+
+| Contract point | Success criteria |
+| --- | --- |
+| `/` serves copy | SC-001 |
+| Responsive layout, no clipping | SC-002 |
+| Server-rendered content | SC-003 |
+| Fast static render | SC-004 |
+| No sensitive content | SC-005 |
+| Existing endpoints unchanged | SC-006 |
