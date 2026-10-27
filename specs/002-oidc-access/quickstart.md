@@ -1,55 +1,53 @@
-# Quickstart: Validate OIDC Sign-In and Role Access
+# Quickstart: OIDC Sign-In and Role Access
 
-This guide describes the end-to-end validation expected from the feature test
-suite. It uses a simulated OIDC provider; no live provider credentials are
-needed. See [HTTP contract](contracts/http.md) and [data model](data-model.md).
+## Automated verification (CI, no live provider)
 
-## Prerequisites
-
-- Go 1.22 or newer.
-- Repository dependencies available through the normal Go module workflow.
-- A temporary directory for the test vault and daemon data.
-
-## Run focused validation
+The simulated provider in `internal/braind/auth/authtest` stands in for Pocket ID with the same claim shapes recorded in [SPK-002](../../docs/spikes/spk-002-pocket-id.md).
 
 ```sh
-go test ./internal/braind/...
+go test ./internal/braind/auth/... ./internal/braind/ -race -timeout 180s
 ```
 
-The integration tests should start a local simulated issuer with discovery,
-authorization, token, JWKS, and optional UserInfo/end-session endpoints, then
-exercise the daemon over `httptest`.
+Expected: all packages `ok`. Coverage of the spec's acceptance scenarios:
 
-## Required scenarios and expected results
+| Scenario | Test surface |
+| --- | --- |
+| US1-AC1 valid sign-in creates an opaque session with a resolved role | `TestCallbackCreatesSession` |
+| US1-AC2 invalid state / nonce / issuer / audience / signature / expiry create no session | `TestCallbackRejects*` |
+| US1-AC3 sign-out destroys the local session and uses provider logout when advertised | `TestLogout*` |
+| US2-AC1–3 role hierarchy, multi-group precedence, unmapped/claim-less denial | `TestResolveRole`, `TestMiddlewareRoleEnforcement` |
+| US2-AC4 browser and JSON outcomes match | `TestSamePolicyAcrossSurfaces` |
+| US3-AC1 session survives provider outage inside the reauth window | `TestOutageWithinReauthWindow` |
+| US3-AC2 overdue session fails closed while provider is down | `TestOutageReauthDueFailsClosed` |
+| US3-AC3 no session while verification is unavailable | `TestSignInFailsWhileProviderDown` |
+| SC-005 zero token/claim disclosure | `TestPrivacyAcrossAuthLogs` |
 
-1. Start login and verify the authorization redirect contains state, nonce,
-   `code_challenge_method=S256`, and only configured scopes.
-2. Complete a valid callback and verify a fresh opaque cookie is issued. The
-   session cookie contains no provider token, subject, email, or group value.
-3. Submit unknown, mismatched, expired, or replayed state; invalid nonce,
-   issuer, audience, signature, or expiry; and malformed group claims. Each
-   case must create no authorized session.
-4. Resolve identities matching admin, user, viewer, overlapping groups, and no
-   configured groups. Expect exact-match mapping and admin > user > viewer;
-   malformed and unmapped identities deny access.
-5. For each protected action, compare HTML and JSON authorization outcomes for
-   the same session. Missing/expired sessions are 401-equivalent, denied roles
-   are 403, and overdue reauthentication during provider outage is 503.
-6. Reject unsafe browser and cookie-authenticated JSON requests without a
-   valid CSRF token; accept a valid session-bound token. Confirm safe GET does
-   not mutate state.
-7. Make the provider unavailable after login. Requests work before the
-   reauthentication deadline using the last verified role; due requests fail
-   closed and do not extend expiry. New login fails without creating a session.
-8. Sign out while the provider is unavailable. Local session invalidation
-   succeeds; the provider end-session redirect is used only when available and
-   configured.
-9. Inspect logs, status, cookies, and public errors across these scenarios;
-   expect no client secret, tokens, authorization code, raw provider response,
-   or raw claims.
+## Manual verification with the live Pocket ID provider
 
-## Full repository validation
+Preconditions: `OIDC_*` configured per the spike; `BRAIND_EXTERNAL_URL=https://brain.lab.johnrowley.co`; account membership in a test role group.
 
-After the focused scenarios pass, run the repository's standard CI checks as
-specified by its contribution guide. The feature must remain independently
-testable without a live identity service or manual provider setup.
+```sh
+go build -o /tmp/opencode/braind ./cmd/braind
+OIDC_ENABLED=true \
+  OIDC_CONFIGURATION_URL=https://oidc.lab.johnrowley.co/.well-known/openid-configuration \
+  OIDC_CLIENT_ID=braind OIDC_CLIENT_SECRET=<secret> \
+  OIDC_ADMIN_GROUP=access-brain-admin OIDC_USER_GROUP=access-brain-user \
+  OIDC_VIEWER_GROUP=access-brain-viewer \
+  BRAIND_EXTERNAL_URL=https://brain.lab.johnrowley.co \
+  BRAIND_DATA_PATH=/tmp/brain-qstart/data \
+  BRAIND_VAULT_PATH=/tmp/brain-qstart/data/vault \
+  BRAIND_GIT_DIR=/tmp/brain-qstart/data/git/vault.git \
+  BRAIND_LISTEN_ADDR=127.0.0.1:18082 /tmp/opencode/braind
+mkdir -p /tmp/brain-qstart/data/vault
+```
+
+Scenarios to walk:
+
+1. **Sign-in (US1)**: `curl -sI http://127.0.0.1:18082/login` shows the prompt (or follows the provider with `OIDC_AUTO_REDIRECT=true`). Complete sign-in in a browser; the daemon must return `Set-Cookie: braind_session=<opaque>; Path=/; HttpOnly; Secure; SameSite=Lax` and land on the requested page.
+2. **Role denial (US2)**: an account in no configured group returns `403` at the protected surface and the daemon log contains only an outcome code, no claims.
+3. **Sign-out (US1-AC3)**: `POST /logout` with the session cookie and `X-CSRF-Token` (available in the page) returns `302` and clears the cookie; a subsequent request is unauthenticated (`401`/`302`).
+4. **Outage (US3)**: block the provider (DNS sinkhole or `/etc/hosts`) and confirm active sessions keep working until `OIDC_REAUTH_INTERVAL` elapses, then return `503 authentication_unavailable`, while `/readyz` still reports `200 ready` (FR-013).
+5. **Replay (SC-002)**: re-hit the saved callback URL: `400 invalid_login_transaction`, no cookie.
+6. **Restart**: restart the process and confirm sessions require new sign-in (in-memory store, research D2).
+
+> Note: `BRAIND_GIT_DIR` must be beneath `BRAIND_DATA_PATH` even with backup disabled (path validation is unconditional), like 001's quickstart.
