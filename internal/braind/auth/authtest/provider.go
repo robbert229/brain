@@ -42,6 +42,7 @@ type Provider struct {
 	codes       map[string]issuedCode
 	access      map[string]map[string]any
 	claims      map[string]any
+	userinfo    map[string]any
 	tokenTTL    time.Duration
 	failAt      map[string]bool
 	logoutReady bool
@@ -54,6 +55,7 @@ type issuedCode struct {
 	redirectURI string
 	nonce       string
 	claims      map[string]any
+	userinfo    map[string]any
 }
 
 // New starts a provider with one signing key and a full discovery document.
@@ -141,6 +143,18 @@ func (p *Provider) SetSubject(subject string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.subject = subject
+}
+
+// SetUserinfoClaims makes the userinfo endpoint authoritative for a claim set of
+// its own, so tests can prove GroupsSource=userinfo wins over the ID token. When
+// unset, userinfo mirrors the ID-token claims.
+func (p *Provider) SetUserinfoClaims(claims map[string]any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.userinfo = make(map[string]any, len(claims))
+	for key, value := range claims {
+		p.userinfo[key] = value
+	}
 }
 
 // SetTokenTTL controls ID-token expiry; a negative value issues expired tokens.
@@ -293,6 +307,7 @@ func (p *Provider) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		redirectURI: redirect,
 		nonce:       queries.Get("nonce"),
 		claims:      p.claimsLocked(),
+		userinfo:    p.userinfoLocked(),
 	}
 	p.mu.Unlock()
 	location := redirect + "?code=" + url.QueryEscape(code) + "&state=" + url.QueryEscape(queries.Get("state"))
@@ -337,7 +352,7 @@ func (p *Provider) handleToken(w http.ResponseWriter, r *http.Request) {
 	idToken := p.signIDToken(stored.claims, stored.nonce)
 	accessToken := "access-" + base64.RawURLEncoding.EncodeToString(randomBytes(12))
 	p.mu.Lock()
-	p.access[accessToken] = stored.claims
+	p.access[accessToken] = stored.userinfo
 	p.mu.Unlock()
 	p.writeJSON(w, http.StatusOK, map[string]any{
 		"access_token": accessToken,
@@ -353,20 +368,22 @@ func (p *Provider) handleUserinfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	p.mu.Lock()
-	claims, found := p.access[bearer]
-	subject := p.subject
-	issuer := p.server.URL
-	if !found {
-		claims = p.claimsLocked()
-	}
-	p.mu.Unlock()
 	if bearer == "" {
 		p.writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid_token"})
 		return
 	}
-	claims["sub"] = subject
-	claims["iss"] = issuer
+	p.mu.Lock()
+	stored, found := p.access[bearer]
+	if !found {
+		stored = p.userinfoLocked()
+	}
+	claims := make(map[string]any, len(stored)+2)
+	for name, value := range stored {
+		claims[name] = value
+	}
+	claims["sub"] = p.subject
+	claims["iss"] = p.server.URL
+	p.mu.Unlock()
 	p.writeJSON(w, http.StatusOK, claims)
 }
 
@@ -439,6 +456,17 @@ func (p *Provider) KeyCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.servedKIDs)
+}
+
+func (p *Provider) userinfoLocked() map[string]any {
+	if p.userinfo != nil {
+		merged := make(map[string]any, len(p.userinfo))
+		for name, value := range p.userinfo {
+			merged[name] = value
+		}
+		return merged
+	}
+	return p.claimsLocked()
 }
 
 func (p *Provider) claimsLocked() map[string]any {

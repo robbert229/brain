@@ -80,7 +80,7 @@ func TestAuthorizeURLRequiresS256(t *testing.T) {
 		}
 		http.Redirect(w, r, "/done", http.StatusFound)
 	})
-	url, err := provider.AuthorizeURL("state-1", "nonce-1", "verifier-value", nil)
+	url, err := provider.AuthorizeURL(context.Background(), "state-1", "nonce-1", "verifier-value", nil)
 	if err != nil {
 		t.Fatalf("authorize url: %v", err)
 	}

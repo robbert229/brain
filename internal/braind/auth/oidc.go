@@ -159,8 +159,17 @@ func (p *Provider) Issuer() string {
 	return p.issuer
 }
 
-// AuthorizeURL builds the provider authorization request using S256 PKCE.
-func (p *Provider) AuthorizeURL(state, nonce, verifier string, scopes []string) (string, error) {
+// AuthorizeURL builds the provider authorization request using S256 PKCE. When
+// the last provider round trip failed it makes one discovery attempt so a
+// recovered provider is usable again without a background poller; a still-failing
+// provider returns an error, which the handler reports as
+// authentication_unavailable (FR-012, FR-013).
+func (p *Provider) AuthorizeURL(ctx context.Context, state, nonce, verifier string, scopes []string) (string, error) {
+	if !p.Healthy() {
+		if err := p.Refresh(ctx); err != nil {
+			return "", err
+		}
+	}
 	p.mu.Lock()
 	endpoints := p.endpoints
 	p.mu.Unlock()
@@ -180,7 +189,6 @@ func (p *Provider) AuthorizeURL(state, nonce, verifier string, scopes []string) 
 		"response_type":         []string{"code"},
 		"client_id":             []string{p.config.ClientID},
 		"redirect_uri":          []string{p.config.RedirectURL},
-		"scope":                 []string{strings.Join(scopes, " ")},
 		"state":                 []string{state},
 		"nonce":                 []string{nonce},
 		"code_challenge":        []string{ChallengeFromVerifier(verifier)},
@@ -190,7 +198,15 @@ func (p *Provider) AuthorizeURL(state, nonce, verifier string, scopes []string) 
 	if err != nil {
 		return "", fmt.Errorf("oidc: authorization endpoint: %w", err)
 	}
-	endpoint.RawQuery = values.Encode()
+	rawQuery := values.Encode()
+	// url.Values.Encode writes spaces as '+', which the prompt page escapes into
+	// the HTML entity form and any URL parser then reads as a fragment start. The
+	// scope list is space-separated (RFC 6749), so write its separators as %20.
+	if len(rawQuery) > 0 {
+		rawQuery += "&"
+	}
+	rawQuery += "scope=" + strings.ReplaceAll(url.QueryEscape(strings.Join(scopes, " ")), "+", "%20")
+	endpoint.RawQuery = rawQuery
 	return endpoint.String(), nil
 }
 
