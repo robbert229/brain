@@ -105,7 +105,7 @@ description: "Task list for the brain web interface landing page (009-landing-pa
 
 - [X] T013 [P] Run full validation per `specs/009-landing-page/quickstart.md` and record outcomes: `go vet ./...`, `go test ./...` (full suite — landing + existing braind tests), local daemon run + curl checks (`/`, `/static/htmx.min.js`, `/static/style.css`, `/healthz` regression, `POST /` → 405, unknown path → 404), no-script text check (§4), responsive check at 320/768/1024/1920 (§5), sensitive-content scan (§6), build smoke `go build ./cmd/braind` (§7).
 - [X] T014 [P] Update `docs/roadmap.md` sequencing/status index to reference this feature (`009-landing-page`) as the initial web surface, keeping the existing table format.
-- [ ] T015 Verify the final commit bundle follows Conventional Commits per `CONTRIBUTING.md` (feature and fix commits use `feat:`/`fix:` scopes; each task group committed with green tests).
+- [X] T015 Verify the final commit bundle follows Conventional Commits per `CONTRIBUTING.md` (feature and fix commits use `feat:`/`fix:` scopes; each task group committed with green tests).
 
 ---
 
