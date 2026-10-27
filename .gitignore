@@ -33,3 +33,6 @@ go.work.sum
 
 # Local output from `make image-publish`.
 /image-ref.txt
+
+.opencode
+.idea
