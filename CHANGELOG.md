@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.0](https://github.com/robbert229/brain/compare/v0.1.0...v0.2.0) (2026-10-27)
+
+
+### Features
+
+* add landing page ([#16](https://github.com/robbert229/brain/issues/16)) ([0b389c9](https://github.com/robbert229/brain/commit/0b389c9b01a416eb977f5180d96bf01705bb70ad))
+* **braind:** load configuration from a .env file ([#17](https://github.com/robbert229/brain/issues/17)) ([2218657](https://github.com/robbert229/brain/commit/22186574e56baaf4f41f79bea5b31359647aa60f))
+
+
+### Bug Fixes
+
+* remove image pull secret from install manifest ([#14](https://github.com/robbert229/brain/issues/14)) ([3c1cfa0](https://github.com/robbert229/brain/commit/3c1cfa01941312acfe7271e8f0a5de29e03fa027))
+
 ## 0.1.0 (2026-10-27)
 
 
