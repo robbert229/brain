@@ -2,9 +2,10 @@
 
 A minimal Go project scaffold with a tiny CLI and tests.
 
-The repository also contains the early `braind` HTTP daemon described in
-[`docs/braind.md`](docs/braind.md). Its first foundation increment exposes only
-process liveness and graceful shutdown.
+The repository also contains the `braind` HTTP daemon. Its current foundation
+and planned capabilities are tracked in the [delivery roadmap](docs/roadmap.md)
+and [feature specs](specs/). Architectural choices are recorded in
+[`docs/adr/`](docs/adr/README.md).
 
 ## Prerequisites
 
@@ -43,9 +44,8 @@ curl http://127.0.0.1:8080/healthz
 Use `go run ./cmd/braind --version` to print its build version. The default
 listen address is `0.0.0.0:8080` and can be changed with
 `BRAIND_LISTEN_ADDR`. OIDC and Git backup are enabled by default, so the smoke
-command disables those not-yet-implemented subsystems. Production startup
-requires the corresponding settings documented in
-[`docs/braind.md`](docs/braind.md#configuration-contract).
+command disables those not-yet-implemented subsystems. The accepted environment
+settings are documented in the [`braind` configuration reference](docs/braind-configuration.md).
 
 Runtime logs are newline-delimited JSON. HTTP responses echo a valid inbound
 `X-Request-ID` or contain a generated one; the same value appears in the
