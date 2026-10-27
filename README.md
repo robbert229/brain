@@ -1,95 +1,49 @@
 # brain
 
-A minimal Go project scaffold with a tiny CLI and tests.
+`brain` is the client for `braind`, an HTTP daemon that provides access to a
+Markdown vault. The client connects to a running daemon. The project is under
+active development; see the [roadmap](docs/roadmap.md) for current status and
+the [feature specs](specs/) for planned capabilities.
 
-The repository also contains the `braind` HTTP daemon. Its current foundation
-and planned capabilities are tracked in the [delivery roadmap](docs/roadmap.md)
-and [feature specs](specs/). Architectural choices are recorded in
-[`docs/adr/`](docs/adr/README.md).
+## Run locally
 
-## Prerequisites
-
-- Go 1.22+
-- [`ko`](https://ko.build/) v0.19.1 and Docker when building or smoke-testing
-  the bootstrap container
-
-## Quick start
-
-```bash
-go run ./cmd/brain
-```
-
-Try a custom name:
-
-```bash
-go run ./cmd/brain --name john
-```
-
-Print version:
-
-```bash
-go run ./cmd/brain --version
-```
-
-Run the daemon:
+Requires Go 1.22 or newer.
 
 ```bash
 BRAIND_DATA_PATH=/tmp/braind-data \
 BRAIND_VAULT_PATH=/tmp/braind-data/vault \
 BRAIND_GIT_DIR=/tmp/braind-data/git/vault.git \
 OIDC_ENABLED=false BRAIND_GIT_BACKUP_ENABLED=false go run ./cmd/braind
+```
+
+In another terminal, check the daemon:
+
+```bash
 curl http://127.0.0.1:8080/healthz
 ```
 
-Alternatively, put any of these settings in a `.env` file in the current
-working directory; `braind` loads it automatically at startup. Values already
-set in the environment take precedence over the file.
+The default listen address is `0.0.0.0:8080`. The local example disables OIDC
+and Git backup because those subsystems are not implemented yet. `braind` can
+also load settings from a `.env` file in the current directory. See the
+[`braind` configuration reference](docs/braind-configuration.md) for details.
 
-Use `go run ./cmd/braind --version` to print its build version. The default
-listen address is `0.0.0.0:8080` and can be changed with
-`BRAIND_LISTEN_ADDR`. OIDC and Git backup are enabled by default, so the smoke
-command disables those not-yet-implemented subsystems. The accepted environment
-settings are documented in the [`braind` configuration reference](docs/braind-configuration.md).
+## Install on Kubernetes
 
-Runtime logs are newline-delimited JSON. HTTP responses echo a valid inbound
-`X-Request-ID` or contain a generated one; the same value appears in the
-request-completion log record.
+The [`deploy/install.yaml`](deploy/install.yaml) bundle installs the current
+bootstrap deployment: one `braind` replica, a 10 GiB persistent volume claim,
+and an internal `ClusterIP` service. The cluster needs a default storage class
+that supports `ReadWriteOnce`; edit the PVC settings in the manifest if needed.
 
-Only one daemon may own a data root at a time. `braind` holds an advisory lock
-at `<BRAIND_DATA_PATH>/braind.lock` until graceful shutdown or process exit.
-
-## Test
+From a checkout of the release version you want to install, apply the bundle
+and wait for the daemon to start:
 
 ```bash
-go test ./...
+kubectl apply -f deploy/install.yaml
+kubectl -n brain rollout status statefulset/braind
 ```
 
-## Bootstrap container
-
-DEP-001 provides a temporary, pure-Go image so the current daemon can be
-deployed before its Obsidian runtime is ready. Build and exercise the image on
-the local Docker daemon with:
-
-```bash
-make image-smoke
-```
-
-To publish the `linux/amd64` and `linux/arm64` OCI index manually:
-
-```bash
-KO_DOCKER_REPO=ghcr.io/robbert229/braind \
-IMAGE_TAG="sha-$(git rev-parse HEAD)" \
-make image-publish
-```
-
-The GitHub workflow publishes the same private GHCR package after relevant
-changes land on `main`, records the immutable digest in its job summary, and
-also updates the temporary `latest` tag. Repository/package visibility must
-remain private. The image is non-root, has a read-only-root smoke test, and
-contains only `braind` plus CA data. It deliberately does **not** contain Node,
-Obsidian Headless, Git, or SSH; `IMG-001` and `IMG-002` replace this bootstrap
-base before Sync or backup is enabled.
-
-Releases are prepared with Release Please and publish a version-tagged private
-image and a matching `deploy/install.yaml` bundle. See the
-[release process](docs/release.md).
+The bundle provides an in-cluster Service. To make `braind` externally
+reachable, provide an ingress resource for your cluster and configure it for
+your desired host and HTTPS setup. The bundle is a bootstrap install and does
+not include the planned OIDC, Sync, or backup features. See the
+[release guide](docs/release.md) for release artifacts and deployment details.
