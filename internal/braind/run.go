@@ -25,10 +25,23 @@ const (
 	readHeaderTimeout      = 5 * time.Second
 )
 
+// envFile is the dot-env file loaded by Run, relative to the current working
+// directory. It is a package-level variable only so tests can point it at a
+// temporary file; production behavior is the default ".env".
+var envFile = ".env"
+
 // Run parses command-line arguments, listens for HTTP requests, and blocks
-// until the context is canceled or the server fails.
+// until the context is canceled or the server fails. Configuration is read
+// from the process environment, overlaid with values from the dot-env file
+// (envFile, ".env" in the current working directory) when one exists;
+// process environment values take precedence.
 func Run(ctx context.Context, args []string, version string, stdout, stderr io.Writer) int {
-	return run(ctx, args, version, stdout, stderr, os.LookupEnv)
+	lookup, err := config.LoadDotEnv(os.LookupEnv, envFile)
+	if err != nil {
+		fmt.Fprintf(stderr, "braind: .env: %v\n", err)
+		return 1
+	}
+	return run(ctx, args, version, stdout, stderr, lookup)
 }
 
 func run(ctx context.Context, args []string, version string, stdout, stderr io.Writer, lookup config.LookupEnv) (exitCode int) {
