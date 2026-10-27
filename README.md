@@ -41,6 +41,10 @@ OIDC_ENABLED=false BRAIND_GIT_BACKUP_ENABLED=false go run ./cmd/braind
 curl http://127.0.0.1:8080/healthz
 ```
 
+Alternatively, put any of these settings in a `.env` file in the current
+working directory; `braind` loads it automatically at startup. Values already
+set in the environment take precedence over the file.
+
 Use `go run ./cmd/braind --version` to print its build version. The default
 listen address is `0.0.0.0:8080` and can be changed with
 `BRAIND_LISTEN_ADDR`. OIDC and Git backup are enabled by default, so the smoke

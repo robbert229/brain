@@ -51,6 +51,31 @@ The smoke command in the [README](../README.md) disables OIDC and Git backup
 because those application subsystems are not yet implemented. Their settings
 and defaults are already part of the validated configuration surface.
 
+## `.env` files
+
+At startup `braind` loads a dot-env file named `.env` from the current working
+directory, so a local run can keep its settings in one file instead of inline
+environment exports:
+
+```bash
+go run ./cmd/braind          # reads ./.env in the working directory
+```
+
+Behavior:
+
+- **Precedence**: a variable already set in the process environment wins over a
+  value in `.env`; the file only fills in variables that are otherwise unset.
+- **Missing file**: `.env` is optional; its absence is not an error. A file
+  that cannot be parsed (invalid `KEY=VALUE` line or variable name) aborts
+  startup with an error identifying the file and line, like other
+  configuration validation.
+- **Format**: one `KEY=VALUE` per line; blank lines and lines starting with `#`
+  are ignored; an optional `export ` prefix is accepted; values wrapped in a
+  matching pair of single or double quotes have the quotes removed. There is no
+  variable interpolation or line continuation.
+- **Secrets**: values read from `.env` (for example `OIDC_CLIENT_SECRET`) are
+  redacted from diagnostics just like process-environment secrets.
+
 `OIDC_API_BEARER_ENABLED` and `OIDC_API_AUDIENCE` are parsed for future use but
 are outside the initial API contract. The initial API uses the same server-side
 sessions as the browser. Deployments MUST leave bearer access disabled until a
