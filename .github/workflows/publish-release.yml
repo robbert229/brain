@@ -16,7 +16,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - name: Check out release source
@@ -94,3 +94,16 @@ jobs:
               and ($architectures | index("arm64") != null)
           ' >/dev/null
           echo "Published ${IMAGE}:${RELEASE_TAG}@${digest}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attach install bundle to draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ inputs.tag_name }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/braind
+        run: |
+          set -euo pipefail
+          grep -Fq "image: ${IMAGE}:${RELEASE_TAG} # x-release-please-version" deploy/install.yaml
+          is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft)"
+          test "$is_draft" = true
+          gh release upload "$RELEASE_TAG" deploy/install.yaml --clobber
+          shasum -a 256 deploy/install.yaml >> "$GITHUB_STEP_SUMMARY"
