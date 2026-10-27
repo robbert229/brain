@@ -90,10 +90,10 @@ inspect logs/`/status` for sensitive values (quickstart Scenarios 5–6).
 
 ## Phase 5: Polish & Cross-Cutting Concerns
 
-- [ ] T017 [P] Update `docs/roadmap.md` Foundation row (FND-001–FND-006 complete) and add a supersession note to the `/readyz → 404` example row in `specs/009-landing-page/contracts/http.md` pointing at `specs/001-daemon-foundation/contracts/http.md`
-- [ ] T018 [P] Run `gofmt -l .` (empty output) and `go vet ./...` (clean) across touched packages
-- [ ] T019 Run `specs/001-daemon-foundation/quickstart.md` scenarios 1–6 manually against the built binary and confirm every SC-001–SC-004 mapping line holds; fix regressions found
-- [ ] T020 [P] Record user-facing changes per `CONTRIBUTING.md` conventions (Conventional Commits, changelog per release-please config)
+- [X] T017 [P] Update `docs/roadmap.md` Foundation row (FND-001–FND-006 complete) and add a supersession note to the `/readyz → 404` example row in `specs/009-landing-page/contracts/http.md` pointing at `specs/001-daemon-foundation/contracts/http.md`
+- [X] T018 [P] Run `gofmt -l .` (empty output) and `go vet ./...` (clean) across touched packages
+- [X] T019 Run `specs/001-daemon-foundation/quickstart.md` scenarios 1–6 manually against the built binary and confirm every SC-001–SC-004 mapping line holds; fix regressions found
+- [X] T020 [P] Record user-facing changes per `CONTRIBUTING.md` conventions (Conventional Commits, changelog per release-please config)
 
 ---
 
