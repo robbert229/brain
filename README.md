@@ -87,4 +87,5 @@ Obsidian Headless, Git, or SSH; `IMG-001` and `IMG-002` replace this bootstrap
 base before Sync or backup is enabled.
 
 Releases are prepared with Release Please and publish a version-tagged private
-image. See the [release process](docs/release.md).
+image and a matching `deploy/install.yaml` bundle. See the
+[release process](docs/release.md).
