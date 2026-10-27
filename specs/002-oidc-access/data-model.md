@@ -63,4 +63,6 @@ Single-use record binding a sign-in request to its callback (research D3).
 | --- | --- |
 | `HealthHealthy` | Last provider round-trip succeeded. |
 | `HealthDegraded` | Last attempt failed (outage) — sessions past reauth fail closed (FR-012). |
-| `HealthDisabled` | OIDC not configured. |
+
+An unconfigured provider has no surface at all, so "disabled" is reported by the
+status snapshot (`oidc.discovery = disabled`) rather than by a live provider.

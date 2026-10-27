@@ -55,12 +55,12 @@ func newFixture(t *testing.T, configure func(*authtest.Provider), mutate func(*a
 	if err := provider.Refresh(context.Background()); err != nil {
 		t.Fatalf("discover provider: %v", err)
 	}
+	clock := &fakeClock{current: time.Now()}
 	sessions := auth.NewSessionStore(auth.SessionPolicy{
-		IdleTimeout:      time.Hour,
+		IdleTimeout:      8 * time.Hour,
 		AbsoluteLifetime: 8 * time.Hour,
 		ReauthInterval:   time.Hour,
-	}, nil)
-	clock := &fakeClock{current: time.Now()}
+	}, clock.Now)
 	transactions := auth.NewTransactionStore(auth.DefaultTransactionTTL, clock.Now)
 
 	config := auth.HandlerConfig{
@@ -77,6 +77,9 @@ func newFixture(t *testing.T, configure func(*authtest.Provider), mutate func(*a
 		GroupsSource: "id_token",
 		BaseURL:      simulator.Issuer(),
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		// The handler must stamp verification with the same clock the session
+		// store reads, otherwise time travel tests disagree about "now".
+		Clock: clock.Now,
 	}
 	if mutate != nil {
 		mutate(&config)

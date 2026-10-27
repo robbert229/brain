@@ -38,8 +38,8 @@ func newProvider(t *testing.T, options ...func(*authtest.Provider)) (*authtest.P
 
 func TestProviderDiscoversAndReportsHealth(t *testing.T) {
 	_, provider := newProvider(t)
-	if provider.State() != auth.DiscoveryReady {
-		t.Fatalf("expected ready discovery, got %s", provider.State())
+	if provider.DiscoveryState() != auth.DiscoveryReady {
+		t.Fatalf("expected ready discovery, got %s", provider.DiscoveryState())
 	}
 	if !provider.Healthy() {
 		t.Fatal("healthy provider reported unhealthy")

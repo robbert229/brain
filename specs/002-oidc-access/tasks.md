@@ -113,13 +113,13 @@ exercise requests before/after the reauthentication interval and session expiry.
 
 ### Tests for User Story 3 (written before implementation)
 
-- [ ] T023 [P] [US3] Write `internal/braind/auth/outage_test.go`: within-window requests succeed with the cached role while the provider is down (US3-AC1); at/after `OIDC_REAUTH_INTERVAL` a protected request returns 503 `authentication_unavailable` and the session is neither created nor extended (US3-AC2); new sign-in attempts while verification is unavailable create no session and `/readyz` stays 200 (US3-AC3, FR-013)
+- [X] T023 [P] [US3] Write `internal/braind/auth/outage_test.go`: within-window requests succeed with the cached role while the provider is down (US3-AC1); at/after `OIDC_REAUTH_INTERVAL` a protected request returns 503 `authentication_unavailable` and the session is neither created nor extended (US3-AC2); new sign-in attempts while verification is unavailable create no session and `/readyz` stays 200 (US3-AC3, FR-013)
 
 ### Implementation for User Story 3
 
-- [ ] T024 [US3] Implement provider health tracking in `internal/braind/auth/oidc.go`: a `Health()` view (`healthy|degraded|disabled`) updated by the last successful discovery/token/JWKS operation with retry that never blocks request paths, plus `DiscoveryState()` for the status snapshot
-- [ ] T025 [US3] Extend `middleware.go` reauth handling: when `Lookup` returns `reauthRequired`, consult health — if healthy, 302/401 to sign in (session destroyed at callback completion per data-model transitions); if degraded, 503 `authentication_unavailable` without touching session expiry (FR-012)
-- [ ] T026 [US3] Implement the callback-side reauth refresh in `internal/braind/auth/handler.go`: completing sign-in for an already-signed-in identity rotates the session (new ID, refreshed `LastVerifiedAt`) rather than stacking sessions, so reauth intervals cannot accumulate
+- [X] T024 [US3] Implement provider health tracking in `internal/braind/auth/oidc.go`: a `Health()` view (`healthy|degraded|disabled`) updated by the last successful discovery/token/JWKS operation with retry that never blocks request paths, plus `DiscoveryState()` for the status snapshot
+- [X] T025 [US3] Extend `middleware.go` reauth handling: when `Lookup` returns `reauthRequired`, consult health — if healthy, 302/401 to sign in (session destroyed at callback completion per data-model transitions); if degraded, 503 `authentication_unavailable` without touching session expiry (FR-012)
+- [X] T026 [US3] Implement the callback-side reauth refresh in `internal/braind/auth/handler.go`: completing sign-in for an already-signed-in identity rotates the session (new ID, refreshed `LastVerifiedAt`) rather than stacking sessions, so reauth intervals cannot accumulate
 
 **Checkpoint**: Outage semantics pass; readiness unaffected.
 

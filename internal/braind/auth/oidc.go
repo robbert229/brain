@@ -29,6 +29,19 @@ const (
 	DiscoveryDegraded DiscoveryState = "degraded"
 )
 
+// HealthState is the coarse view middleware consults before failing a request
+// closed during an outage.
+type HealthState string
+
+const (
+	HealthHealthy  HealthState = "healthy"
+	HealthDegraded HealthState = "degraded"
+)
+
+// Disabled is reported by the status snapshot, not by a live provider, so
+// HealthState has no disabled member: an unconfigured provider has no surface
+// at all (contracts/http.md).
+
 // ProviderConfig configures one OIDC provider (the only supported configuration,
 // per ADR-0005).
 type ProviderConfig struct {
@@ -138,11 +151,23 @@ func (p *Provider) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// State reports discovery health for the status snapshot.
-func (p *Provider) State() DiscoveryState {
+// DiscoveryState reports discovery health for the status snapshot.
+func (p *Provider) DiscoveryState() DiscoveryState {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.state
+}
+
+// Health reports whether provider round trips are succeeding. Callers gate on
+// this instead of the discovery timestamp so a recovered provider is trusted
+// again immediately (data-model.md ProviderHealth).
+func (p *Provider) Health() HealthState {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.state == DiscoveryReady {
+		return HealthHealthy
+	}
+	return HealthDegraded
 }
 
 // Healthy reports whether the last provider round trip succeeded.

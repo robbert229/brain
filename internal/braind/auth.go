@@ -137,18 +137,6 @@ func (s *authSurface) refresh(ctx context.Context, publisher *status.Store) {
 	})
 }
 
-// publishSessions keeps active_sessions accurate from the status path rather
-// than from request handling (contracts/http.md).
-func (s *authSurface) publishSessions(publisher *status.Store) {
-	if s == nil {
-		return
-	}
-	s.sessions.Prune()
-	publisher.Update(func(snapshot *status.Snapshot) {
-		snapshot.OIDC.ActiveSessions = s.sessions.Count()
-	})
-}
-
 // Close stops the discovery watch and the session sweeper.
 func (s *authSurface) Close() {
 	if s == nil {
