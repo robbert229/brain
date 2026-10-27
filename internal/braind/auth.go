@@ -73,9 +73,7 @@ func newAuthSurface(processConfig config.Config, logger *slog.Logger) (*authSurf
 		AutoRedirect: oidc.AutoRedirect,
 		BaseURL:      baseURL,
 		Logger:       logger.With("component", "auth"),
-		// The groups scope is how the provider returns the claim the role map
-		// reads; OIDC_EXTRA_SCOPES extends it without dropping what matters.
-		Scopes: append([]string{"openid", "profile", "email", "groups"}, oidc.ExtraScopes...),
+		Scopes:       requestedScopes(oidc.ExtraScopes),
 	})
 	if err != nil {
 		return nil, err
@@ -87,6 +85,22 @@ func newAuthSurface(processConfig config.Config, logger *slog.Logger) (*authSurf
 		provider: provider,
 		done:     make(chan struct{}),
 	}, nil
+}
+
+// requestedScopes is what the provider is asked for: the identity scopes plus
+// whatever OIDC_EXTRA_SCOPES adds. The groups scope belongs in the base list
+// because the role map reads that claim (FR-004), so extras only ever extend it.
+func requestedScopes(extra []string) []string {
+	seen := make(map[string]bool, len(extra)+4)
+	scopes := make([]string, 0, len(extra)+4)
+	for _, scope := range append([]string{"openid", "profile", "email", "groups"}, extra...) {
+		if scope == "" || seen[scope] {
+			continue
+		}
+		seen[scope] = true
+		scopes = append(scopes, scope)
+	}
+	return scopes
 }
 
 // register mounts the sign-in surface. The anonymous entry points and the

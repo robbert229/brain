@@ -127,10 +127,10 @@ exercise requests before/after the reauthentication interval and session expiry.
 
 ## Phase 6: Polish & Cross-Cutting Concerns
 
-- [ ] T027 [P] Feed the status snapshot from `internal/braind/status/status.go`: keep `oidc.active_sessions` accurate via `SessionStore.Count()` (called from the status refresh path, not from request paths) and publish `oidc.discovery` as `disabled|pending|ready|degraded` from `Provider.Health()` (001 contract extension, no new sensitive fields)
-- [ ] T028 [P] Update `deploy/install.yaml` with a commented OIDC block (`OIDC_ENABLED` and friends already listed) noting that `BRAIND_EXTERNAL_URL` must match the public origin for the callback path, and document session/CSRF cookie attributes in `docs/braind-configuration.md`
-- [ ] T029 [P] Write `docs/adr`-consistent operator notes: add a short section to `docs/braind-configuration.md` (or a new `docs/auth.md`) describing restart-means-sign-out (research D2), the reauth-interval outage rule (FR-012), and that readiness never depends on the provider (FR-013/ADR-0003)
-- [ ] T030 Run the full quickstart validation: `go test ./... -race` plus the automated scenario table (US1–US3, SC-001–SC-005), then the live-provider manual steps if available; record results in this file and the PR description
+- [X] T027 [P] Feed the status snapshot from `internal/braind/status/status.go`: keep `oidc.active_sessions` accurate via `SessionStore.Count()` (called from the status refresh path, not from request paths) and publish `oidc.discovery` as `disabled|pending|ready|degraded` from `Provider.Health()` (001 contract extension, no new sensitive fields)
+- [X] T028 [P] Update `deploy/install.yaml` with a commented OIDC block (`OIDC_ENABLED` and friends already listed) noting that `BRAIND_EXTERNAL_URL` must match the public origin for the callback path, and document session/CSRF cookie attributes in `docs/braind-configuration.md`
+- [X] T029 [P] Write `docs/adr`-consistent operator notes: add a short section to `docs/braind-configuration.md` (or a new `docs/auth.md`) describing restart-means-sign-out (research D2), the reauth-interval outage rule (FR-012), and that readiness never depends on the provider (FR-013/ADR-0003)
+- [X] T030 Run the full quickstart validation: `go test ./... -race` plus the automated scenario table (US1–US3, SC-001–SC-005), then the live-provider manual steps if available; record results in this file and the PR description
 
 ---
 
@@ -167,3 +167,29 @@ e.g. `feat(auth): add OIDC verification, sessions, and role resolution (spec 002
 Phase 2, `feat(auth): sign in through OIDC with single-use transactions (spec 002)` for
 Phase 3, `feat(auth): enforce one role policy across browser and API (spec 002)` for
 Phase 4, `feat(auth): fail closed when provider reauth is overdue (spec 002)` for Phase 5.
+
+---
+
+## Validation Results (2026-10-27)
+
+```
+gofmt -l internal/braind/...  → clean
+go vet ./...                  → clean
+go test ./... -race -count=1  → all packages ok
+go test ./internal/braind/auth/... ./internal/braind/ -race -v → 211 PASS / 0 FAIL
+```
+
+Scenario outcomes, all from the simulated provider in `internal/braind/auth/authtest`:
+
+| Criterion | Result | Evidence |
+| --- | --- | --- |
+| SC-001 exactly one effective role or denial | met | `TestResolveRoleMapsMembership`, `TestOverlappingGroupsResolveToHighestRole`, `TestResolveRoleIgnoresUnconfiguredGroups`, `TestCallbackDeniesIdentitiesWithoutRoles` |
+| SC-002 invalid/expired/replayed callbacks create no session | met | `TestCallbackRejectsReplay`, `TestTransactionRejectsReplayAndUnknownState`, `TestCallbackRejectsExpiredIDToken`, `TestVerifyIDTokenRejectsInvalidTokens` |
+| SC-003 browser and API decisions match per role/action | met | `TestPolicyParityAcrossSurfaces`, `TestRoleBelowRequirementIsForbidden`, `TestProtectedRoutesApplyPolicyAtTheDaemon` |
+| SC-004 outage grace ends with the reauth interval | met | `TestActiveSessionSurvivesTheProviderOutage`, `TestSessionPastReauthIntervalFailsClosedDuringOutage`, `TestReauthRotatesTheSessionOnceTheProviderRecovers` |
+| SC-005 no tokens or raw claims in logs/cookies/status | met | `TestPrivacyAcrossSignInFailures`, `TestPrivacySessionCookiesAreOpaque`, `TestPrivacyLoginPromptLeaksNothing`, `TestAuthRoutesServeProviderWhenOIDCEnabled` |
+
+Not executed: the manual live-Pocket-ID walk in `quickstart.md` steps 1–6. It needs
+the real issuer, a registered client, and group membership, none of which exist in
+CI; the automated table above is the substitute, and its flows are driven through
+the same HTTP shapes a browser uses.

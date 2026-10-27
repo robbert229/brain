@@ -2,13 +2,16 @@ package braind
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/johnrowl/brain/internal/braind/auth"
 	"github.com/johnrowl/brain/internal/braind/auth/authtest"
 	"github.com/johnrowl/brain/internal/braind/config"
 	"github.com/johnrowl/brain/internal/braind/lifecycle"
@@ -172,6 +175,134 @@ func TestAuthSurfaceWatchPublishesDiscoveryState(t *testing.T) {
 		t.Fatalf("discovery state after outage = %q, want degraded", got)
 	}
 }
+
+// TestStatusReportsActiveSessionsAfterSignIn is FR-014 at the daemon level: the
+// whole sign-in flow runs through the mux and the operator-facing status
+// document counts the sessions it produced. No request path writes the count, so
+// a number that tracks this flow cannot be a stale guess.
+func TestStatusReportsActiveSessionsAfterSignIn(t *testing.T) {
+	simulator := authtest.New(t)
+	surface := enableOIDC(t, simulator)
+	store := status.New(status.Snapshot{OIDC: status.OIDC{Enabled: true, Discovery: status.OIDCPending}}, authtest.ClientSecret, "")
+	handler := newHandler(handlerState{auth: surface, statusStore: store})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go surface.watch(ctx, store)
+	waitForDiscovery(t, store, status.OIDCReady)
+
+	// A browser follows the single link the sign-in page offers, the provider
+	// sends it back with a code, and the callback hands it a session cookie.
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/login", nil))
+	match := daemonAuthorizeLink.FindStringSubmatch(recorder.Body.String())
+	if match == nil {
+		t.Fatalf("prompt has no sign-in link: %s", recorder.Body.String())
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	authorizeResponse, err := client.Get(strings.ReplaceAll(match[1], "&amp;", "&"))
+	if err != nil {
+		t.Fatalf("authorize request: %v", err)
+	}
+	defer authorizeResponse.Body.Close()
+	if authorizeResponse.StatusCode != http.StatusFound {
+		t.Fatalf("authorize status = %d", authorizeResponse.StatusCode)
+	}
+
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, authorizeResponse.Header.Get("Location"), nil))
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("callback = %d, want 302 body=%s", recorder.Code, recorder.Body.String())
+	}
+	sessionCookie, found := sessionCookie(recorder)
+	if !found {
+		t.Fatalf("callback set no session cookie: %+v", recorder.Result().Cookies())
+	}
+
+	if sessions := activeSessions(t, handler, surface, store); sessions != 1 {
+		t.Fatalf("active_sessions = %d after one sign-in, want 1", sessions)
+	}
+
+	// Sign-out is counted too, which is what makes the number trustworthy.
+	session, outcome := surface.sessions.Lookup(sessionCookie.Value)
+	if outcome != auth.OutcomeActive {
+		t.Fatalf("session after callback = %s, want active", outcome)
+	}
+	recorder = httptest.NewRecorder()
+	logout := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	logout.Header.Set(auth.CSRFHeader, session.CSRFToken)
+	logout.Header.Set("Accept", "application/json")
+	logout.AddCookie(sessionCookie)
+	handler.ServeHTTP(recorder, logout)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("logout = %d, want 204", recorder.Code)
+	}
+	if sessions := activeSessions(t, handler, surface, store); sessions != 0 {
+		t.Fatalf("active_sessions = %d after sign-out, want 0", sessions)
+	}
+
+	for _, field := range []string{"active_sessions", "discovery"} {
+		if !strings.Contains(storeJSON(t, handler), field) {
+			t.Fatalf("status document lacks %q: %s", field, storeJSON(t, handler))
+		}
+	}
+}
+
+// activeSessions refreshes the published view the way the watch loop would and
+// returns what the daemon serves at /status.
+func activeSessions(t *testing.T, handler http.Handler, surface *authSurface, store *status.Store) int {
+	t.Helper()
+	surface.refresh(context.Background(), store)
+	var document struct {
+		OIDC struct {
+			ActiveSessions int `json:"active_sessions"`
+		} `json:"oidc"`
+	}
+	if err := json.Unmarshal(storeJSONBytes(t, handler), &document); err != nil {
+		t.Fatalf("decode status document: %v", err)
+	}
+	return document.OIDC.ActiveSessions
+}
+
+func storeJSON(t *testing.T, handler http.Handler) string {
+	t.Helper()
+	return string(storeJSONBytes(t, handler))
+}
+
+func storeJSONBytes(t *testing.T, handler http.Handler) []byte {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/status", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	return recorder.Body.Bytes()
+}
+
+func waitForDiscovery(t *testing.T, store *status.Store, want status.OIDCDiscoveryState) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if store.Load().OIDC.Discovery == want {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("discovery state = %q, want %q", store.Load().OIDC.Discovery, want)
+}
+
+func sessionCookie(recorder *httptest.ResponseRecorder) (*http.Cookie, bool) {
+	for _, cookie := range recorder.Result().Cookies() {
+		if cookie.Name == auth.CookieName {
+			return cookie, true
+		}
+	}
+	return nil, false
+}
+
+// daemonAuthorizeLink finds the provider link the sign-in prompt hands the
+// browser, which is the only sign-in path a real user has.
+var daemonAuthorizeLink = regexp.MustCompile(`href="([^"]+)"`)
 
 // enableOIDC configures a daemon surface against the simulated provider. The
 // public origin stays HTTPS because that is what configuration validation

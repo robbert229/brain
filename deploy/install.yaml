@@ -105,8 +105,43 @@ spec:
               value: "false"
             - name: BRAIND_GIT_BACKUP_ENABLED
               value: "false"
+            # Canonical public origin. It builds the provider redirect URI and
+            # the session cookie scope, so it must match how users reach this
+            # daemon; anything else makes sign-in land on an unknown host.
+            - name: BRAIND_EXTERNAL_URL
+              value: https://brain.lab.johnrowley.co
             - name: OIDC_ENABLED
               value: "false"
+            # Sign-in (spec 002). Set OIDC_ENABLED to "true" and uncomment once
+            # one provider is configured. Create the secret out of band, e.g.
+            #   kubectl -n brain create secret generic braind-oidc \
+            #     --from-literal=client-secret='<secret>'
+            # so the credential never lives in this file.
+            # - name: OIDC_CONFIGURATION_URL
+            #   value: https://issuer.example.com/.well-known/openid-configuration
+            # - name: OIDC_CLIENT_ID
+            #   value: braind
+            # - name: OIDC_CLIENT_SECRET
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: braind-oidc
+            #       key: client-secret
+            # Exact-match groups. A person in none of them is denied.
+            # - name: OIDC_ADMIN_GROUP
+            #   value: access-brain-admin
+            # - name: OIDC_USER_GROUP
+            #   value: access-brain-user
+            # - name: OIDC_VIEWER_GROUP
+            #   value: access-brain-viewer
+            # Session lifetimes. Sessions live in memory, so a restart or
+            # reschedule signs everyone out; OIDC_REAUTH_INTERVAL also bounds how
+            # long a session may be trusted without a fresh provider round trip.
+            # - name: BRAIND_SESSION_IDLE_TIMEOUT
+            #   value: 1h
+            # - name: BRAIND_SESSION_ABSOLUTE_LIFETIME
+            #   value: 8h
+            # - name: OIDC_REAUTH_INTERVAL
+            #   value: 1h
           startupProbe:
             httpGet:
               path: /healthz

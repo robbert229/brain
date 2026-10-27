@@ -12,15 +12,20 @@ Expected: all packages `ok`. Coverage of the spec's acceptance scenarios:
 
 | Scenario | Test surface |
 | --- | --- |
-| US1-AC1 valid sign-in creates an opaque session with a resolved role | `TestCallbackCreatesSession` |
-| US1-AC2 invalid state / nonce / issuer / audience / signature / expiry create no session | `TestCallbackRejects*` |
-| US1-AC3 sign-out destroys the local session and uses provider logout when advertised | `TestLogout*` |
-| US2-AC1–3 role hierarchy, multi-group precedence, unmapped/claim-less denial | `TestResolveRole`, `TestMiddlewareRoleEnforcement` |
-| US2-AC4 browser and JSON outcomes match | `TestSamePolicyAcrossSurfaces` |
-| US3-AC1 session survives provider outage inside the reauth window | `TestOutageWithinReauthWindow` |
-| US3-AC2 overdue session fails closed while provider is down | `TestOutageReauthDueFailsClosed` |
-| US3-AC3 no session while verification is unavailable | `TestSignInFailsWhileProviderDown` |
-| SC-005 zero token/claim disclosure | `TestPrivacyAcrossAuthLogs` |
+| US1-AC1 valid sign-in creates an opaque session with a resolved role | `TestSignInCreatesSessionWithResolvedRole`, `TestSignInLandsOnRequestedPage` |
+| US1-AC2 invalid state / nonce / issuer / audience / signature / expiry create no session | `TestCallbackRejectsInvalidTransactions`, `TestCallbackRejectsExpiredIDToken`, `TestCallbackRejectsReplay`, `TestVerifyIDTokenRejectsInvalidTokens`, `TestExchangeRejectsWrongVerifier` |
+| US1-AC2 one-time transactions | `TestTransactionIssueAndRedeem`, `TestTransactionRejectsReplayAndUnknownState`, `TestTransactionConcurrentRedeemHasOneWinner` |
+| US1-AC3 sign-out destroys the local session and uses provider logout when advertised | `TestSignoutClearsLocalSession`, `TestSignoutUsesProviderLogoutWhenAdvertised`, `TestSignoutWithProviderDownStillClearsLocalSession` |
+| US2-AC1–3 role hierarchy, multi-group precedence, unmapped/claim-less denial | `TestResolveRoleMapsMembership`, `TestResolveRoleIgnoresUnconfiguredGroups`, `TestOverlappingGroupsResolveToHighestRole`, `TestRoleBelowRequirementIsForbidden`, `TestCallbackDeniesIdentitiesWithoutRoles`, `TestUnmappedIdentityNeverReachesProtectedRoutes` |
+| US2-AC4 browser and JSON outcomes match | `TestPolicyParityAcrossSurfaces`, `TestAnonymousRequestsAreAlwaysRoutedToSignIn`, `TestAnonymousRequestOutcomeIsSurfaceSpecificButDecisionsMatch` |
+| FR-008 CSRF on state-changing requests | `TestStateChangingRequestRequiresCSRFToken`, `TestValidCSRFTokenAllowsTheRequest`, `TestCSRFFormFieldIsAccepted`, `TestSafeMethodsSkipTheCSRFCheck` |
+| US3-AC1 session survives provider outage inside the reauth window | `TestActiveSessionSurvivesTheProviderOutage` |
+| US3-AC2 overdue session fails closed while provider is down | `TestSessionPastReauthIntervalFailsClosedDuringOutage`, `TestBrowserGetsSignInRedirectWhenProviderIsReachable`, `TestReauthRotatesTheSessionOnceTheProviderRecovers` |
+| US3-AC3 no session while verification is unavailable | `TestProviderOutageCreatesNoSession`, `TestLoginReportsAuthenticationUnavailable` |
+| FR-013 readiness independent of the provider (daemon) | `TestProviderOutageLeavesReadinessAlone` |
+| Status snapshot (`oidc.discovery`, `oidc.active_sessions`) | `TestAuthSurfaceWatchPublishesDiscoveryState`, `TestStatusReportsActiveSessionsAfterSignIn` |
+| Public surface unchanged when OIDC is off | `TestAuthRoutesAreAbsentWhenOIDCDisabled` |
+| SC-005 zero token/claim disclosure | `TestPrivacyAcrossSignInFailures`, `TestPrivacySessionCookiesAreOpaque`, `TestPrivacyLoginPromptLeaksNothing` |
 
 ## Manual verification with the live Pocket ID provider
 
