@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ func TestHandlerRejectsOtherMethodsAndPaths(t *testing.T) {
 		status int
 	}{
 		{name: "post health", method: http.MethodPost, path: "/healthz", status: http.StatusMethodNotAllowed},
-		{name: "unknown path", method: http.MethodGet, path: "/readyz", status: http.StatusNotFound},
+		{name: "unknown path", method: http.MethodGet, path: "/unknown-path", status: http.StatusNotFound},
 	}
 
 	for _, test := range tests {
@@ -132,7 +133,7 @@ func TestRunVersion(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	exitCode := Run(context.Background(), []string{"--version"}, "test-version", &stdout, &stderr)
+	exitCode := Run(context.Background(), []string{"--version"}, "test-version", "test-commit", &stdout, &stderr)
 
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0, got %d: %s", exitCode, stderr.String())
@@ -151,7 +152,7 @@ func TestRunRejectsInvalidArguments(t *testing.T) {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
-			if got := Run(context.Background(), args, "test", &stdout, &stderr); got != 2 {
+			if got := Run(context.Background(), args, "test", "test-commit", &stdout, &stderr); got != 2 {
 				t.Fatalf("expected exit code 2, got %d", got)
 			}
 		})
@@ -162,7 +163,7 @@ func TestRunRejectsInvalidConfiguration(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	exitCode := run(context.Background(), nil, "test", &stdout, &stderr, mapLookup(map[string]string{}))
+	exitCode := run(context.Background(), nil, "test", "test-commit", &stdout, &stderr, mapLookup(map[string]string{}))
 
 	if exitCode != 1 {
 		t.Fatalf("expected exit code 1, got %d", exitCode)
@@ -180,7 +181,7 @@ func TestRunConfigurationLogDoesNotDiscloseConfiguredSecrets(t *testing.T) {
 		config.EnvOIDCClientSecret: secret,
 	}
 
-	exitCode := run(context.Background(), nil, "test", &stdout, &stderr, mapLookup(environment))
+	exitCode := run(context.Background(), nil, "test", "test-commit", &stdout, &stderr, mapLookup(environment))
 
 	if exitCode != 1 {
 		t.Fatalf("expected exit code 1, got %d", exitCode)
@@ -197,7 +198,7 @@ func TestRunUsesEnvironmentConfiguration(t *testing.T) {
 	var stderr bytes.Buffer
 	environment := localEnvironment(t)
 
-	exitCode := run(ctx, nil, "test", &stdout, &stderr, mapLookup(environment))
+	exitCode := run(ctx, nil, "test", "test-commit", &stdout, &stderr, mapLookup(environment))
 
 	if strings.Contains(stderr.String(), datalock.ErrUnsupported.Error()) {
 		t.Skip(datalock.ErrUnsupported)
@@ -230,7 +231,7 @@ func TestRunRejectsLockedDataRoot(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	exitCode := run(context.Background(), nil, "test", &stdout, &stderr, mapLookup(environment))
+	exitCode := run(context.Background(), nil, "test", "test-commit", &stdout, &stderr, mapLookup(environment))
 
 	if exitCode != 1 {
 		t.Fatalf("expected exit code 1, got %d", exitCode)
@@ -295,6 +296,123 @@ func TestServeRejectsNonPositiveShutdownTimeout(t *testing.T) {
 	defer listener.Close()
 	if err := Serve(context.Background(), listener, Handler(), 0); err == nil {
 		t.Fatal("expected an error for a non-positive shutdown timeout")
+	}
+}
+
+func TestRunRejectsNonPositiveShutdownTimeout(t *testing.T) {
+	environment := localEnvironment(t)
+	environment[config.EnvShutdownTimeout] = "banana"
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	exitCode := run(context.Background(), nil, "test", "test-commit", &stdout, &stderr, mapLookup(environment))
+
+	if exitCode != 1 {
+		t.Fatalf("expected exit code 1, got %d", exitCode)
+	}
+	if !strings.Contains(stderr.String(), config.EnvShutdownTimeout) {
+		t.Fatalf("shutdown timeout error did not identify the setting: %q", stderr.String())
+	}
+}
+
+// syncWriter collects concurrent log output safely for assertions while run writes.
+type syncWriter struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (w *syncWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
+func (w *syncWriter) contains(needle string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.Contains(w.buf.String(), needle)
+}
+
+func (w *syncWriter) text() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+// TestRunEnforcesConfiguredShutdownBound proves the BRAIND_SHUTDOWN_TIMEOUT
+// value actually governs the drain: a connection that never finishes its
+// request headers is force-closed when the bound expires, and run reports the
+// failed graceful shutdown instead of hanging.
+func TestRunEnforcesConfiguredShutdownBound(t *testing.T) {
+	const bound = 150 * time.Millisecond
+	environment := localEnvironment(t)
+	environment[config.EnvShutdownTimeout] = bound.String()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var stdout syncWriter
+	var stderr syncWriter
+	result := make(chan int, 1)
+	go func() { result <- run(ctx, nil, "test", "test-commit", &stdout, &stderr, mapLookup(environment)) }()
+	cleanupReturned := false
+	t.Cleanup(func() {
+		cancel()
+		if !cleanupReturned {
+			select {
+			case <-result: // run already exited in the test body
+			case <-time.After(3 * time.Second):
+				t.Error("run did not exit after cleanup cancellation")
+			}
+		}
+	})
+
+	address := ""
+	deadline := time.Now().Add(5 * time.Second)
+	for address == "" {
+		if time.Now().After(deadline) {
+			t.Fatalf("daemon never started listening: %s", stdout.text())
+		}
+		if _, after, ok := strings.Cut(stdout.text(), `"address":"`); ok {
+			if addressPart, _, _ := strings.Cut(after, `"`); addressPart != "" {
+				address = addressPart
+			}
+		}
+		if address == "" {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	connection, err := net.Dial("tcp", address)
+	if err != nil {
+		t.Fatalf("dial daemon: %v", err)
+	}
+	defer connection.Close()
+	// Start request headers without terminating them: the connection stays
+	// active until readHeaderTimeout, well past our shutdown bound.
+	if _, err := connection.Write([]byte("GET /healthz HTTP/1.1\r\nHost: brain.test\r\n")); err != nil {
+		t.Fatalf("send partial request: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond) // let the server register the connection
+
+	cancelledAt := time.Now()
+	cancel()
+	select {
+	case exitCode := <-result:
+		cleanupReturned = true
+		elapsed := time.Since(cancelledAt)
+		if exitCode != 1 {
+			t.Fatalf("expected exit code 1 after the bound expired, got %d (stderr=%q)", exitCode, stderr.text())
+		}
+		if elapsed < bound/2 {
+			t.Fatalf("shutdown finished in %v before draining the held connection", elapsed)
+		}
+		if elapsed > 5*time.Second {
+			t.Fatalf("shutdown took %v, far beyond the configured bound %v", elapsed, bound)
+		}
+		if !strings.Contains(stderr.text(), "graceful shutdown") {
+			t.Fatalf("run did not report the expired shutdown bound: %q", stderr.text())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not return within five seconds of cancellation")
 	}
 }
 

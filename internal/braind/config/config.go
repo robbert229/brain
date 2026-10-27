@@ -56,7 +56,12 @@ const (
 	EnvSessionAbsoluteLifetime = "BRAIND_SESSION_ABSOLUTE_LIFETIME"
 	EnvOIDCReauthInterval      = "OIDC_REAUTH_INTERVAL"
 	EnvTrustedProxyCIDRs       = "BRAIND_TRUSTED_PROXY_CIDRS"
+	EnvShutdownTimeout         = "BRAIND_SHUTDOWN_TIMEOUT"
 )
+
+// DefaultShutdownTimeout is the graceful drain bound used when
+// BRAIND_SHUTDOWN_TIMEOUT is unset; deployments should declare their own.
+const DefaultShutdownTimeout = 5 * time.Second
 
 const redacted = "[redacted]"
 
@@ -79,6 +84,7 @@ type Config struct {
 type Server struct {
 	ListenAddr        string
 	ExternalURL       string
+	ShutdownTimeout   time.Duration
 	TrustedProxyCIDRs []netip.Prefix
 }
 
@@ -208,8 +214,9 @@ func Load(lookup LookupEnv) (Config, error) {
 
 	config := Config{
 		server: Server{
-			ListenAddr:  read(EnvListenAddr, "0.0.0.0:8080"),
-			ExternalURL: read(EnvExternalURL, "https://brain.lab.johnrowley.co"),
+			ListenAddr:      read(EnvListenAddr, "0.0.0.0:8080"),
+			ExternalURL:     read(EnvExternalURL, "https://brain.lab.johnrowley.co"),
+			ShutdownTimeout: readPositiveDuration(EnvShutdownTimeout, DefaultShutdownTimeout),
 		},
 		vault: Vault{
 			DataPath:     read(EnvDataPath, "/data"),
@@ -479,6 +486,7 @@ func (c Config) Diagnostics() map[string]string {
 	result := map[string]string{
 		EnvListenAddr:              c.server.ListenAddr,
 		EnvExternalURL:             c.server.ExternalURL,
+		EnvShutdownTimeout:         c.server.ShutdownTimeout.String(),
 		EnvDataPath:                c.vault.DataPath,
 		EnvVaultPath:               c.vault.VaultPath,
 		EnvReadOnly:                strconv.FormatBool(c.vault.ReadOnly),

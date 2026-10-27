@@ -3,6 +3,7 @@ package braind
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,8 +22,7 @@ import (
 )
 
 const (
-	defaultShutdownTimeout = 5 * time.Second
-	readHeaderTimeout      = 5 * time.Second
+	readHeaderTimeout = 5 * time.Second
 )
 
 // envFile is the dot-env file loaded by Run, relative to the current working
@@ -35,16 +35,16 @@ var envFile = ".env"
 // from the process environment, overlaid with values from the dot-env file
 // (envFile, ".env" in the current working directory) when one exists;
 // process environment values take precedence.
-func Run(ctx context.Context, args []string, version string, stdout, stderr io.Writer) int {
+func Run(ctx context.Context, args []string, version, commit string, stdout, stderr io.Writer) int {
 	lookup, err := config.LoadDotEnv(os.LookupEnv, envFile)
 	if err != nil {
 		fmt.Fprintf(stderr, "braind: .env: %v\n", err)
 		return 1
 	}
-	return run(ctx, args, version, stdout, stderr, lookup)
+	return run(ctx, args, version, commit, stdout, stderr, lookup)
 }
 
-func run(ctx context.Context, args []string, version string, stdout, stderr io.Writer, lookup config.LookupEnv) (exitCode int) {
+func run(ctx context.Context, args []string, version, commit string, stdout, stderr io.Writer, lookup config.LookupEnv) (exitCode int) {
 	startedAt := time.Now()
 	fs := flag.NewFlagSet("braind", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -80,7 +80,7 @@ func run(ctx context.Context, args []string, version string, stdout, stderr io.W
 	serverLogger := logger.With("component", "server")
 	processLifecycle := lifecycle.New()
 	statusStore := status.New(
-		status.Initial(version, "", processConfig, processLifecycle.Snapshot(), startedAt),
+		status.Initial(version, commit, processConfig, processLifecycle.Snapshot(), startedAt),
 		oidcConfig.ClientSecret,
 		backupConfig.RemoteURL,
 	)
@@ -114,7 +114,12 @@ func run(ctx context.Context, args []string, version string, stdout, stderr io.W
 		return changed
 	}
 	serverLogger.Info("server listening", "version", version, "address", listener.Addr().String())
-	if err := serve(ctx, listener, logging.HTTPMiddleware(logger, Handler()), defaultShutdownTimeout, beginShutdown); err != nil {
+	serverHandler := newHandler(handlerState{
+		process:     processLifecycle,
+		vaultPath:   processConfig.Vault().VaultPath,
+		statusStore: statusStore,
+	})
+	if err := serve(ctx, listener, logging.HTTPMiddleware(logger, serverHandler), processConfig.Server().ShutdownTimeout, beginShutdown); err != nil {
 		serverLogger.Error("server stopped with error", "error", err)
 		return 1
 	}
@@ -139,9 +144,20 @@ func rawLogSecrets(lookup config.LookupEnv) []string {
 	return secrets
 }
 
-// Handler returns the daemon's HTTP handler. FND-001 exposes process liveness;
-// the landing page (spec 009) is served at the root and its assets under /static/.
-func Handler() http.Handler {
+// Handler returns the daemon's HTTP handler without operational state, serving
+// liveness, the landing page (spec 009), and its static assets. The unready
+// readiness surface answers /readyz with 503 (contracts/http.md).
+func Handler() http.Handler { return newHandler(handlerState{}) }
+
+// handlerState bundles the concrete operational state that probe routes read.
+// Zero values mean "not wired"; readiness then fails closed.
+type handlerState struct {
+	process     *lifecycle.Lifecycle // process lifecycle, nil before lifecycle wiring
+	vaultPath   string               // local vault directory probed by readiness
+	statusStore *status.Store        // operational snapshot publisher, nil until wired
+}
+
+func newHandler(state handlerState) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -149,11 +165,63 @@ func Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ok\n")
 	})
+	// FND-006 (ADR-0003): readiness reports local serving capability, never
+	// upstream OIDC/Sync/Backup state.
+	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		if readiness(state) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(w, "ready\n")
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, "not ready\n")
+	})
 	mux.Handle("GET /static/", http.StripPrefix("/static/", staticAssetsHandler()))
+	// FR-008: the snapshot store marshals only the privacy-safe public view.
+	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		encoder := json.NewEncoder(w)
+		if state.statusStore != nil {
+			_ = encoder.Encode(state.statusStore)
+			return
+		}
+		_ = encoder.Encode(status.Snapshot{})
+	})
 	// "GET /{$}" matches only the exact root path so unknown paths keep
 	// returning 404 (contracts/http.md; run_test.go rejection cases).
 	mux.HandleFunc("GET /{$}", serveLanding)
 	return mux
+}
+
+// readiness is the single readiness decision: the process lifecycle must
+// report ready AND the local vault must be accessible (FR-004, FR-005).
+func readiness(state handlerState) bool {
+	if state.process == nil || !state.process.Snapshot().Ready {
+		return false
+	}
+	return vaultAccessible(state.vaultPath)
+}
+
+// vaultAccessible reports whether path is a directory whose contents can be
+// read. It fails closed on any error and never caches (research D2): the next
+// probe always sees current truth.
+func vaultAccessible(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	dir, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer dir.Close()
+	if _, err := dir.ReadDir(1); err != nil && !errors.Is(err, io.EOF) {
+		return false // io.EOF only means the directory is empty: accessible
+	}
+	return true
 }
 
 // Serve runs an HTTP server on listener. Canceling ctx begins graceful

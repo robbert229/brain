@@ -15,7 +15,7 @@ the existing surface.
 | `GET` | `/static/htmx.min.js` | `200 OK` | `text/javascript; charset=utf-8` | Embedded, vendored htmx `2.0.11`. |
 | `GET` | `/healthz` | `200 OK` | `text/plain; charset=utf-8` | Unchanged: body `ok\n`, `Cache-Control: no-store`. |
 | any | `/` (other methods) | `405 Method Not Allowed` | — | Only `GET` is registered on `/`. |
-| `GET` | any other path | `404 Not Found` | — | Existing behavior preserved (e.g., `/readyz` → 404). |
+| `GET` | any other path | `404 Not Found` | — | Existing behavior preserved. `/readyz` is no longer an example: it is now served by [001 Daemon foundation](../../specs/001-daemon-foundation/contracts/http.md) (`200 ready` / `503 not ready`). |
 
 ## Response guarantees
 
