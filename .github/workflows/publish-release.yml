@@ -1,0 +1,96 @@
+name: Publish release image
+
+on:
+  workflow_call:
+    inputs:
+      tag_name:
+        description: Release Please tag, for example v0.1.0
+        required: true
+        type: string
+      source_sha:
+        description: Commit SHA associated with the release tag
+        required: true
+        type: string
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release tag matches source SHA
+        env:
+          RELEASE_TAG: ${{ inputs.tag_name }}
+          RELEASE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(git rev-parse "${RELEASE_TAG}^{commit}")" = "$RELEASE_SHA"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Set up ko
+        uses: ko-build/setup-ko@v0.10
+        with:
+          version: v0.19.1
+
+      - name: Install crane
+        run: go install github.com/google/go-containerregistry/cmd/crane@v0.20.3
+
+      - name: Log in to private GHCR package
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and publish release image
+        id: build
+        env:
+          KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/braind
+          RELEASE_TAG: ${{ inputs.tag_name }}
+        run: |
+          set -euo pipefail
+          ko build ./cmd/braind \
+            --bare \
+            --platform=linux/amd64,linux/arm64 \
+            --tags="$RELEASE_TAG" \
+            --ldflags "-s -w" \
+            --ldflags "-X=main.version=$RELEASE_TAG" \
+            --image-refs=image-refs.txt
+          image_ref="$(head -n 1 image-refs.txt)"
+          case "$image_ref" in
+            "$KO_DOCKER_REPO"@sha256:*) ;;
+            *) echo "ko emitted unexpected image reference: $image_ref" >&2; exit 1 ;;
+          esac
+          echo "image_ref=$image_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Verify published tag and digest
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/braind
+          RELEASE_TAG: ${{ inputs.tag_name }}
+          BUILT_REF: ${{ steps.build.outputs.image_ref }}
+        run: |
+          set -euo pipefail
+          manifest="$(crane manifest "${IMAGE}:${RELEASE_TAG}")"
+          digest="$(crane digest "${IMAGE}:${RELEASE_TAG}")"
+          test "$BUILT_REF" = "${IMAGE}@${digest}"
+          echo "$manifest" | jq -e '
+            [.manifests[].platform | select(.os == "linux") | .architecture] as $architectures
+            | ($architectures | index("amd64") != null)
+              and ($architectures | index("arm64") != null)
+          ' >/dev/null
+          echo "Published ${IMAGE}:${RELEASE_TAG}@${digest}" >> "$GITHUB_STEP_SUMMARY"
