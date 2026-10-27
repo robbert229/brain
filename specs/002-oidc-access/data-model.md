@@ -1,62 +1,68 @@
-# Data Model: OIDC Sign-In and Role Access
+# Phase 1 Data Model: OIDC Sign-In and Role Access
 
-Authentication records are operational, in-memory state. They contain no
-canonical note content and are cleared when the daemon restarts.
+Entities exist only in memory (research D2/D3). Field-level validation rules are stated in *invariants*; state transitions are the contract the middleware enforces.
 
 ## Identity
 
-Represents the minimum information accepted from a successfully verified OIDC
-identity.
+A provider-verified person as captured at successful callback. Never serialized.
 
-| Field | Type | Rules |
+| Field | Type | Invariant |
 | --- | --- | --- |
-| Subject | string | Required, non-empty, provider-scoped stable identifier. Never placed in the browser cookie. |
-| Display value | string | Optional configured user claim (email by default); sanitize for display and do not use as the authorization key. |
-| Role | Role | Exactly `admin`, `user`, `viewer`, or `none`; derived only from verified groups. |
-| Verified at | time | Set only after full token and transaction validation; refreshed only after successful provider verification. |
+| `Subject` | string | Non-empty `sub` claim; provider-verified. |
+| `UserClaim` | string | Configured claim (`email` default) rendered only when display is needed; never logged. |
+| `Groups` | []string | Exact values from configured claim/source; stored only for role audit within the session; never exposed. |
+| `VerifiedAt` | time.Time | Set at session creation; the `LastVerifiedAt` anchor origin. |
 
-### Role resolution
+## Role
 
-The configured group claim must be an array/list of strings. Compare exact
-values with the distinct configured admin, user, and viewer groups. If more
-than one matches, choose `admin`, then `user`, then `viewer`. Missing,
-malformed, and unrecognized claims resolve to `none`; such identities receive
-no session for protected access.
+| Value | Meaning |
+| --- | --- |
+| `RoleAdministrator` | Membership in `OIDC_ADMIN_GROUP`. |
+| `RoleUser` | Membership in `OIDC_USER_GROUP`. |
+| `RoleViewer` | Membership in `OIDC_VIEWER_GROUP`. |
+| `RoleNone` | No exact match, or claim absent/malformed → deny (FR-005). |
+
+**Resolution** (`ResolveRole`): scan membership; return the highest precedence match. Overlap ⇒ administrator (FR-010). Partial matches (e.g. `access-brain-us`) are not membership.
 
 ## Session
 
-| Field | Type | Rules |
+| Field | Type | Invariant |
 | --- | --- | --- |
-| ID | random opaque bytes | High entropy; only its encoded value is sent in the cookie. Rotate when authentication is established or privilege is refreshed. |
-| Identity | Identity | Contains verified minimal identity fields and effective role, never raw tokens or unfiltered claims. |
-| CreatedAt | time | Set on successful callback. |
-| LastActivityAt | time | Updated only on accepted authenticated activity. |
-| LastVerifiedAt | time | Set on successful provider verification; controls outage grace. |
-| CSRFToken | random opaque bytes | Session-bound synchronizer token; not the session ID and not placed in URLs. |
+| `ID` | string | 32 crypto-random bytes, base64url. Cookie-safe; no derived structure. |
+| `Identity` | Identity | Set at creation (FR-002 gate passed). |
+| `Role` | Role | Computed once at creation from `ResolveRole`; re-computed on reauth. |
+| `CSRFToken` | string | Per-session crypto-random token (research D6). |
+| `CreatedAt` | time.Time | Absolute-lifetime anchor. |
+| `LastUsedAt` | time.Time | Idle anchor; advanced on successful protected use. |
+| `LastVerifiedAt` | time.Time | Reauth anchor; advanced only on full reauthentication. |
 
-Session is valid only while both idle timeout and absolute lifetime are within
-limits. Reauthentication becomes due at `LastVerifiedAt + OIDC_REAUTH_INTERVAL`.
-If the provider is unavailable before that deadline, the last verified role
-may be used until the deadline. Once due, protected requests fail closed and
-do not extend the session. Logout deletes the record and expires the cookie.
+**Transitions**
+- `created → active` on any allowed protected request (refresh idle).
+- `active → expired` when idle or absolute lifetime elapses, or when `reauthInterval` elapses (→ reauth required).
+- `any → destroyed` on sign-out, absolute expiry, or sweep. Destroyed sessions are unrecoverable.
 
-## Login transaction
+**Store contract**: concurrent-safe (mutex/CAS); lookup is O(1) and returns `(Session, outcome)` where outcome ∈ {active, expired, reauthRequired}. Sweeper runs on a fixed interval plus opportunistic creation-time pruning.
 
-| Field | Type | Rules |
+## LoginTransaction
+
+Single-use record binding a sign-in request to its callback (research D3).
+
+| Field | Type | Invariant |
 | --- | --- | --- |
-| State | random opaque bytes | High entropy, unique, compared in constant time where supported, and consumed once. |
-| Nonce | random opaque bytes | Bound to the OIDC request and matched to the verified ID token. |
-| PKCE verifier | random secret | Kept server-side until callback; challenge uses S256. |
-| CreatedAt / ExpiresAt | time | Short bounded lifetime; expired transactions cannot be used. |
-| Return path | local path | Optional validated same-origin path; reject absolute URLs and protocol-relative paths. |
+| `State` | string | 32-byte random; cookie-independent key. |
+| `Nonce` | string | 32-byte random; embedded in the authorization request. |
+| `Verifier` | string | PKCE S256 verifier; challenge derived from it. |
+| `CreatedAt` | time.Time | Transaction TTL = 10 min (`transactionTTL`). |
+| `PostLoginRedirect` | string | Safe path the visitor requested; default `/`. |
 
-A transaction transitions from pending to consumed or expired. A consumed,
-expired, unknown, or mismatched transaction cannot create a session.
+**Transitions**: `issued → redeemed` (delete wins race ⇒ replay rejected) · `issued → expired` (TTL) · never observable outside the server.
 
-## Configuration
+## ProviderHealth (supporting view)
 
-Immutable validated process configuration includes provider discovery URL and
-client credentials, expected issuer/client ID, claim name and source, three
-distinct group names, display claim, extra scopes, idle and absolute session
-lifetimes, reauthentication interval, external/callback URL context, and
-trusted proxy CIDRs. Secret values are never exposed by status or diagnostics.
+| Value | Meaning |
+| --- | --- |
+| `HealthHealthy` | Last provider round-trip succeeded. |
+| `HealthDegraded` | Last attempt failed (outage) — sessions past reauth fail closed (FR-012). |
+
+An unconfigured provider has no surface at all, so "disabled" is reported by the
+status snapshot (`oidc.discovery = disabled`) rather than by a live provider.

@@ -29,7 +29,7 @@ is validated at startup; secret values are redacted from diagnostics.
 | `BRAIND_GIT_KNOWN_HOSTS_PATH` | `/run/secrets/git/known_hosts` | Pinned SSH host keys for backup. |
 | `BRAIND_LOG_LEVEL` | `info` | Structured log verbosity. |
 | `OIDC_ENABLED` | `true` | Enable OIDC configuration validation. |
-| `OIDC_CONFIGURATION_URL` | empty | HTTPS provider configuration URL. |
+| `OIDC_CONFIGURATION_URL` | empty | Provider configuration URL. HTTPS, except an HTTP loopback provider in development. |
 | `OIDC_CLIENT_ID` | empty | Registered OIDC client identifier. |
 | `OIDC_CLIENT_SECRET` | empty | Confidential-client secret. |
 | `OIDC_GROUPS_CLAIM` | `groups` | Claim containing group names. |
@@ -48,9 +48,61 @@ is validated at startup; secret values are redacted from diagnostics.
 | `OIDC_REAUTH_INTERVAL` | `1h` | Maximum interval between role re-evaluations. |
 | `BRAIND_TRUSTED_PROXY_CIDRS` | empty | Trusted proxy ranges for forwarded request metadata. |
 
-The smoke command in the [README](../README.md) disables OIDC and Git backup
-because those application subsystems are not yet implemented. Their settings
-and defaults are already part of the validated configuration surface.
+The smoke command in the [README](../README.md) disables OIDC and Git backup:
+sign-in needs a real provider, so it cannot complete without one, and Git backup
+is not yet implemented. Their settings and defaults are already part of the
+validated configuration surface.
+
+## Sign-in, sessions, and CSRF
+
+`OIDC_ENABLED` is true by default, so configuration validation already requires
+one provider's URL, client identifier, and secret before the daemon starts.
+What the running daemon does with them is what an operator needs to know,
+because it sets the failure modes you will see.
+
+**One provider.** Exactly one provider is supported. The daemon discovers its
+endpoints and signing keys from `OIDC_CONFIGURATION_URL`; there is no fallback
+issuer and no per-user provider choice.
+
+**Sessions live in memory.** There is no session store to back up, replicate, or
+keep warm across replicas. A restart, reschedule, or rollout signs every browser
+out. Keep `BRAIND_SESSION_ABSOLUTE_LIFETIME` modest and expect sign-ins around
+deploys.
+
+**The session cookie is the whole client.** Its value is 32 random bytes; tokens
+and claims stay server-side.
+
+| Attribute | Value | Reason |
+| --- | --- | --- |
+| Name | `braind_session` | the only browser-visible part of a session |
+| `Path` | `/` | every route shares one session |
+| `HttpOnly` | set | scripts cannot read or copy it |
+| `Secure` | set | sign-in must never travel over plaintext |
+| `SameSite` | `Lax` | cross-site POSTs carry no session |
+| `Max-Age` | absent | closing the browser ends the session |
+
+`BRAIND_EXTERNAL_URL` must match how people actually reach the daemon: it builds
+the provider `redirect_uri`, so a mismatch sends the callback to a host the
+browser never asked to be signed into.
+
+**State-changing requests need a CSRF token.** `GET`, `HEAD`, and `OPTIONS` carry
+no risk and are exempt. Everything else from an authenticated browser must prove
+the sender issued the page, by sending the per-session token in the `X-CSRF-Token`
+header, or in a `csrf_token` form field for plain form posts. A missing or wrong
+token is `403 csrf_check_failed`, the same answer on pages and JSON.
+
+**A provider outage affects sign-in, never the vault or readiness.** A session
+that is inside `OIDC_REAUTH_INTERVAL` keeps working while the provider is
+unreachable, because its role was verified at sign-in. Once the interval has
+passed, the daemon must re-verify: browsers are sent to `/login?next=…` and API
+clients receive `reauthentication_required`. If the provider cannot be consulted
+at all, the answer is `503 authentication_unavailable` and the session is **not**
+extended, so repeated retries cannot ride out an outage. `/readyz` ignores
+provider state entirely, so a down issuer never drains a Kubernetes endpoint.
+
+**Sign-in outcomes carry no secrets.** Sign-in, denial, and failure responses
+disclose no tokens, claims, or credentials, and daemon logs record only the
+outcome name (`granted`, `forbidden`, `invalid_login_transaction`, …).
 
 ## `.env` files
 

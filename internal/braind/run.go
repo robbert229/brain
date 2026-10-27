@@ -78,6 +78,16 @@ func run(ctx context.Context, args []string, version, commit string, stdout, std
 		return 1
 	}
 	serverLogger := logger.With("component", "server")
+	authSurface, err := newAuthSurface(processConfig, logger)
+	if err != nil {
+		// Readiness never depends on the provider (FR-013), so an unusable OIDC
+		// setup degrades to the public surface instead of stopping the daemon.
+		serverLogger.Error("authentication unavailable", "error", err)
+		authSurface = nil
+	}
+	if authSurface != nil {
+		defer authSurface.Close()
+	}
 	processLifecycle := lifecycle.New()
 	statusStore := status.New(
 		status.Initial(version, commit, processConfig, processLifecycle.Snapshot(), startedAt),
@@ -114,10 +124,14 @@ func run(ctx context.Context, args []string, version, commit string, stdout, std
 		return changed
 	}
 	serverLogger.Info("server listening", "version", version, "address", listener.Addr().String())
+	if authSurface != nil {
+		go authSurface.watch(ctx, statusStore)
+	}
 	serverHandler := newHandler(handlerState{
 		process:     processLifecycle,
 		vaultPath:   processConfig.Vault().VaultPath,
 		statusStore: statusStore,
+		auth:        authSurface,
 	})
 	if err := serve(ctx, listener, logging.HTTPMiddleware(logger, serverHandler), processConfig.Server().ShutdownTimeout, beginShutdown); err != nil {
 		serverLogger.Error("server stopped with error", "error", err)
@@ -155,6 +169,7 @@ type handlerState struct {
 	process     *lifecycle.Lifecycle // process lifecycle, nil before lifecycle wiring
 	vaultPath   string               // local vault directory probed by readiness
 	statusStore *status.Store        // operational snapshot publisher, nil until wired
+	auth        *authSurface         // OIDC sign-in surface, nil when OIDC is disabled
 }
 
 func newHandler(state handlerState) http.Handler {
@@ -193,6 +208,10 @@ func newHandler(state handlerState) http.Handler {
 	// "GET /{$}" matches only the exact root path so unknown paths keep
 	// returning 404 (contracts/http.md; run_test.go rejection cases).
 	mux.HandleFunc("GET /{$}", serveLanding)
+	// Spec 002: the sign-in surface exists only when OIDC is configured. Probes,
+	// status, static assets, and the landing page stay registered above so they
+	// remain reachable without a provider round trip (ADR-0003).
+	state.auth.register(mux)
 	return mux
 }
 

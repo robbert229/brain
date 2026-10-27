@@ -2,79 +2,45 @@
 
 **Branch**: `002-oidc-access` | **Date**: 2026-10-26 | **Spec**: [spec.md](./spec.md)
 
-**Input**: Feature specification from `/specs/002-oidc-access/spec.md`
+**Input**: Feature specification from `specs/002-oidc-access/spec.md`
 
 ## Summary
 
-Add sign-in through one configured OIDC provider, map verified group claims to
-administrator, user, viewer, or no access, and enforce the same role policy on
-browser and JSON API requests. Use an Authorization Code flow with S256 PKCE,
-validate the callback before creating an opaque server-side session, protect
-browser mutations with CSRF tokens, and fail closed when an existing session
-passes its reauthentication deadline during provider unavailability. The
-provider outage must not affect local readiness.
-
-Technical approach: extend the existing Go 1.22 `braind` HTTP daemon and
-configuration packages. Keep OIDC protocol validation in a small explicit
-authentication boundary, session and login-transaction state in process memory
-for the single daemon process, and authorization in one shared policy used by
-HTML and JSON handlers. Use a simulated OIDC provider and `httptest` for
-independent tests; production provider settings remain environment based. The
-live Pocket ID behavior and role precedence are recorded in
-[research.md](./research.md).
+Add OpenID Connect sign-in to `braind` using one configured provider (Authorization Code flow with S256 PKCE, RS256 ID-token validation against discovered JWKS), an opaque server-side session store, and a single role policy that maps exact-match groups claims to administrator/user/viewer. Authentication is a new `internal/braind/auth` package mounted between the existing `logging.HTTPMiddleware` and the daemon mux, with a middleware that resolves the session role once per request so browser and JSON surfaces share one decision (FR-006, ADR-0004/ADR-0005). Provider interaction reuses the stdlib-only pattern proven in `tools/oidcverify`; tests use an in-repo simulated provider so the feature is CI-testable without a live identity service (Principle I).
 
 ## Technical Context
 
-**Language/Version**: Go 1.22 (`github.com/johnrowl/brain`)
+**Language/Version**: Go 1.22 (stdlib only; no new module dependencies)
 
-**Primary Dependencies**: Existing stdlib HTTP server, configuration, logging,
-status, and lifecycle packages. OIDC client and JWT validation dependency
-selection is documented in [research.md](./research.md); no provider-specific
-SDK is required by the contract.
+**Primary Dependencies**: None beyond the standard library (`crypto/rsa`, `encoding/base64`, `encoding/json`, `net/http`, `crypto/rand`, `net/http/cookiejar` not needed server-side). `tools/oidcverify/main.go` documents the proven discovery/PKCE/JWKS/token-exchange pattern.
 
-**Storage**: No note-content storage. Session and short-lived login transaction
-records are operational in-memory state; vault Markdown remains the only
-canonical note store. Sessions do not survive daemon restart.
+**Storage**: None. Sessions and login transactions are in-memory (operational data — Principle V explicitly excludes them from the vault-as-truth rule). A restart signs everyone out; that is acceptable for v1 (documented).
 
-**Testing**: Go `testing` and `net/http/httptest`, using a local simulated OIDC
-issuer and deterministic clocks/randomness seams where required. Tests exercise
-handlers and the same policy used in production.
+**Testing**: `go test` with `httptest.Server` simulating the provider (discovery, JWKS, authorize, token, logout endpoints). No live provider, no secrets committed. `-race` required for session/transaction store tests.
 
-**Target Platform**: Linux server (`braind`) behind HTTPS ingress; standard
-browser clients.
+**Target Platform**: Linux container (Kubernetes, single replica — ADR-0008).
 
-**Project Type**: Go web service with server-rendered HTML and JSON endpoints.
+**Project Type**: Single-binary web service (`braind`), same module as 001.
 
-**Performance Goals**: Authentication and authorization add no external
-provider request to each ordinary request; revalidation is bounded by the
-configured interval. No throughput target is specified by the feature.
+**Performance Goals**: Authentication adds one provider round-trip per login only; request-time auth cost is an O(1) map lookup (session) per protected request. Discovery fetch is background/startup with cache; per-request path never calls the provider.
 
-**Constraints**: One configured OIDC provider; confidential client with
-server-side secret and S256 PKCE; strict issuer, audience, expiry, nonce, and
-single-use state validation; secure opaque cookies; shared HTML/API sessions
-and role policy; no bearer API tokens in v1; exact group matching and
-admin > user > viewer precedence; browser CSRF protection; no credentials or
-raw claims in logs, cookies, status, or diagnostics. Readiness remains based on
-local vault availability.
+**Constraints**: Session cookie `HttpOnly`, `Secure`, `SameSite=Lax`; state-changing requests carry a CSRF token (FR-008); zero token/raw-claim disclosure in logs, cookies, and `/status` (FR-003, SC-005); readiness never depends on provider health (FR-013, ADR-0003).
 
-**Scale/Scope**: One daemon replica and one provider; three roles; login,
-callback, logout, session middleware, CSRF, and authorization across protected
-browser and JSON routes.
+**Scale/Scope**: One provider, three roles, single admin audience. Roughly 5 new source files plus wiring; ~25 tests.
 
 ## Constitution Check
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-| Principle | Result | Basis |
-| --- | --- | --- |
-| I. Independently Testable Features | PASS | A local simulated issuer exercises success, rejection, expiry, replay, outage, and logout with no live identity service. |
-| II. Explicit Business Logic | PASS | Group-to-role mapping, precedence, session deadlines, and authorization outcomes are explicit policy functions with direct tests. |
-| III. Simplicity Over Abstraction | PASS | One provider and one process-local session store; no account database, multi-provider framework, or token API. Keep protocol and policy seams only where needed for correctness and deterministic tests. |
-| IV. Go Backend, HTMX Frontend | PASS | Go handlers render ordinary HTML and forms; HTMX remains an enhancement, with no JavaScript application server. |
-| V. Markdown as the Single Source of Truth | PASS | Authentication data is operational state; no canonical note content is stored outside the configured Markdown vault. |
-| Data & Storage | PASS | Session state is not note content or a derived vault index. No vault mutation behavior changes. |
+| Principle | Result |
+| --- | --- |
+| I. Independently testable | PASS — simulated provider package exercises sign-in, callback rejection, expiry, replay, outage, and role policy in CI. |
+| II. Explicit business logic | PASS — role resolution is a named pure function (`ResolveRole`); session/CSRF/outage rules live in named middleware steps, each with direct tests. |
+| III. Simplicity over abstraction | PASS — stdlib-only OIDC (no go-oidc dependency, rejected as unused generality); one auth package; no framework. |
+| IV. Go backend, HTMX frontend | PASS — sign-in/out are ordinary form POST/redirect flows; login landing stays server-rendered HTML. |
+| V. Markdown single source of truth | PASS (N/A) — sessions/transactions are operational data, explicitly out of scope of the principle. |
 
-No constitution violations identified.
+No violations; no complexity tracking needed.
 
 ## Project Structure
 
@@ -82,32 +48,33 @@ No constitution violations identified.
 
 ```text
 specs/002-oidc-access/
-├── plan.md
-├── research.md
-├── data-model.md
-├── quickstart.md
-├── contracts/
-│   └── http.md
-└── tasks.md             # Phase 2 output; not created by this plan
+├── plan.md              # this file
+├── research.md          # Phase 0: stdlib OIDC, session design, test provider, CSRF, outage policy
+├── data-model.md        # Phase 1: Identity, Role, Session, LoginTransaction
+├── quickstart.md        # Phase 1: end-to-end verification with the simulated provider
+├── contracts/http.md    # Phase 1: login/callback/logout routes, auth outcomes, middleware contract
+└── tasks.md             # Phase 2 (/speckit.tasks)
 ```
 
 ### Source Code (repository root)
 
 ```text
-cmd/braind/main.go                    # daemon entry point; configuration wiring
-internal/braind/run.go                # construct dependencies and register routes
-internal/braind/config/config.go      # OIDC and session configuration validation
-internal/braind/auth/                 # OIDC flow, sessions, role policy, CSRF boundary
-internal/braind/web/                  # browser and JSON handlers/middleware as needed
-internal/braind/*_test.go             # handler and lifecycle integration tests
+internal/braind/
+├── auth/                    # new package: everything authentication
+│   ├── oidc.go              #   discovery, JWKS, ID-token validation, S256 PKCE, token exchange
+│   ├── role.go              #   ResolveRole(groups, cfg) Role — precedence admin>user>viewer
+│   ├── session.go           #   opaque session store: create/lookup/rotate/destroy, idle+absolute+reauth timers
+│   ├── transaction.go       #   single-use login transactions (state, nonce, verifier, expiry)
+│   ├── handler.go           #   /login, /oauth2/callback, /logout handlers + login prompt page
+│   └── middleware.go        #   RequireAuth policy middleware + CSRF check for state-changing methods
+├── auth/authtest/           # exported test helper: simulated OIDC provider (used by internal/braind tests too)
+│   └── provider.go
+├── run.go                   # mount /login /oauth2/callback /logout + wrap protected routes; feed status store
+├── status/status.go         # discovery state + ActiveSessions wiring (fields already exist)
+├── config/config.go         # existing OIDC/session keys — no new keys expected
+└── logging/                 # unchanged; redaction list already covers configured secrets
+
+tools/oidcverify/            # unchanged spike reference
 ```
 
-**Structure Decision**: Keep the implementation in the existing Go module and
-daemon. Add an `auth` package only for the cohesive security boundary and place
-routes alongside existing web handling; avoid new processes, databases, or
-frontend tiers. Exact file placement can follow existing package ownership
-when tasks are generated.
-
-## Complexity Tracking
-
-No constitution violations; this table is intentionally empty.
+**Structure Decision**: One new package (`internal/braind/auth`) keeps tokens, sessions, and policy decisions out of `run.go`'s HTTP wiring while avoiding a speculative framework (Principle III). The simulated provider lives under `auth/authtest` so both `auth` tests and full-daemon `braind` tests share one provider without duplicating a fake.

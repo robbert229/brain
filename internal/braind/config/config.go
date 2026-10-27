@@ -334,7 +334,7 @@ func validate(config *Config, errs *[]error) {
 		require(EnvOIDCUserGroup, config.oidc.UserGroup, errs)
 		require(EnvOIDCViewerGroup, config.oidc.ViewerGroup, errs)
 		if config.oidc.ConfigurationURL != "" {
-			if err := validateHTTPSURL(config.oidc.ConfigurationURL); err != nil {
+			if err := validateIssuerURL(config.oidc.ConfigurationURL); err != nil {
 				*errs = append(*errs, fmt.Errorf("%s: %w", EnvOIDCConfigurationURL, err))
 			}
 		}
@@ -429,6 +429,34 @@ func validateHTTPSURL(raw string) error {
 		return errors.New("must not contain credentials or a fragment")
 	}
 	return nil
+}
+
+// validateIssuerURL accepts HTTPS issuers and, mirroring auth/oidc.go, the
+// loopback HTTP provider that CI tests without certificates. Remote issuers stay
+// HTTPS-only so sign-in can never be MITM'd over plaintext (FR-001).
+func validateIssuerURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return errors.New("must be an absolute URL")
+	}
+	if parsed.User != nil || parsed.Fragment != "" {
+		return errors.New("must not contain credentials or a fragment")
+	}
+	switch parsed.Scheme {
+	case "https":
+		if parsed.Host == "" {
+			return errors.New("must be an absolute HTTPS URL")
+		}
+		return nil
+	case "http":
+		host := parsed.Hostname()
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+			return nil
+		}
+		return errors.New("must be HTTPS except for loopback test providers")
+	default:
+		return errors.New("must be an absolute HTTPS URL")
+	}
 }
 
 func hasURLCredentials(raw string) bool {

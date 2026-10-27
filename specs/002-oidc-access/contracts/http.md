@@ -1,57 +1,52 @@
-# HTTP Contract: OIDC Sign-In and Role Access
+# Phase 1 HTTP Contract: OIDC Sign-In and Role Access
 
-All browser and JSON routes use the same authenticated session and role policy.
-Names below describe route semantics; route prefixes should follow the existing
-versioned API contract when that API is introduced.
+All responses carry the standard request-ID behavior from 001. Session cookie name: `braind_session`.
 
-## Authentication routes
+## Public routes (unchanged from 001)
 
-| Method and path | Behavior |
-| --- | --- |
-| `GET /auth/login` | Start OIDC Authorization Code flow. Create single-use state, nonce, and S256 PKCE transaction; redirect only to the configured issuer authorization endpoint. |
-| `GET /auth/callback` | Validate and consume transaction; exchange code; validate issuer, audience, signature, expiry, nonce, and verified claims. On success rotate/create a server-side session and redirect to a validated local return path. Invalid callbacks create no session. |
-| `POST /auth/logout` | Require a valid session and CSRF token; invalidate local session and expire cookie. Redirect through the configured provider end-session endpoint if supported, otherwise to the local signed-out page. |
-| `GET /auth/logout/callback` | Accept only the configured post-logout return and render signed-out state; must not restore a local session. |
-
-Login and callback responses are non-cacheable. Authentication failures use a
-generic user-safe response and do not expose provider bodies, secrets, tokens,
-codes, subject values, or raw claims.
-
-## Session cookie
-
-The cookie contains only a high-entropy opaque session reference. It is set
-`Secure` when served over the configured external HTTPS origin, `HttpOnly`,
-`SameSite=Lax` or stricter where the callback flow permits, and scoped narrowly
-to the service path. It has no provider token or identity data. Responses
-carrying or changing authentication state use `Cache-Control: no-store`.
-
-## Authorization outcomes
-
-| Condition | Browser response | JSON response |
+| Method | Path | Notes |
 | --- | --- | --- |
-| No session / expired session | Redirect to login or render sign-in-required response | `401 Unauthorized` |
-| Authenticated role lacks permission | `403 Forbidden` page | `403 Forbidden` |
-| Role is `none` | Deny protected content; do not establish an authorized session | `403 Forbidden` |
-| Reauthentication overdue and provider unavailable | `503 Service Unavailable`, no session extension | `503 Service Unavailable` |
-| Authorized | Continue to handler | Continue to handler |
+| GET | `/healthz`, `/readyz`, `/static/*`, `/{$}` (landing) | Anonymous. |
+| GET | `/status` | Anonymous operator view; includes `oidc.active_sessions`. Provider outage never affects `/readyz` (FR-013). |
 
-Both surfaces call the same role/action policy. API requests use the same
-session cookie; bearer tokens are not part of v1. Error bodies are generic and
-contain no sensitive provider detail.
+## Auth routes (new)
 
-## CSRF
+| Method | Path | Auth | Success | Failure |
+| --- | --- | --- | --- | --- |
+| GET | `/login` | anon | `200` sign-in prompt. The prompt issues a login transaction server-side (keyed by `state`) and links to the provider authorization URL carrying `state`, `nonce`, and the S256 PKCE challenge. With `OIDC_AUTO_REDIRECT=true` it `302`s to the provider instead. | `503 {"error":"authentication_unavailable"}` when provider discovery is unreachable. When `OIDC_ENABLED=false` the routes are not registered (anonymous vault routes are impossible in that configuration; documented in quickstart). |
+| GET | `/oauth2/callback` | anon (transaction required) | `302` to `PostLoginRedirect` with `Set-Cookie: braind_session=...; Path=/; HttpOnly; Secure; SameSite=Lax`, rotating the session. Issues CSRF token for the session. | See callback failure matrix. |
+| POST | `/logout` | session + CSRF | Destroys session, `302` to `/` with `Set-Cookie: braind_session=""; Max-Age=0` (cleared), and — when discovery advertised `end_session_endpoint` — redirects the browser through provider logout to end the provider session. | `403` CSRF failure; provider-outage logout still destroys the local session and returns `204`. |
 
-All browser state-changing requests use unsafe HTTP methods and require a
-session-bound synchronizer token submitted in a form field or request header.
-Missing or invalid tokens are rejected with `403 Forbidden`. GET and HEAD
-requests must not change state. JSON endpoints using the browser session cookie
-also require CSRF protection for state-changing requests.
+### Callback failure matrix (all create no session; FR-002, SC-002, FR-009)
 
-## Role policy
+| Condition | Status | Body |
+| --- | --- | --- |
+| `state` absent/unknown/expired/replayed | `400` | `{"error":"invalid_login_transaction"}` |
+| Provider `?error=` response | `303` → `/login` | query `?login_error=access_denied` (sanitized code only) |
+| Token endpoint failure | `303` → `/login` | `?login_error=provider_unavailable` |
+| ID-token signature/aud/iss/exp/nonce failure | `400` | `{"error":"invalid_id_token"}` (reasons only in logs, redacted) |
+| Valid identity, no mapped group | `403` | `{"error":"access_denied"}` — no session cookie. |
 
-The shared policy grants actions according to the configured hierarchy and
-route requirements. For the initial policy, admin includes user and viewer
-capabilities, user includes viewer capabilities, and viewer receives only the
-read actions defined by the corresponding feature. Group claims are exact
-matches; role precedence is admin, user, viewer. Unmapped identities are
-denied.
+## Protected routes (middleware contract)
+
+Everything vault/API from 003+ sits behind `auth.RequireAuth`. The middleware classifies each request:
+
+| Condition | Browser (`Accept: text/html`) | JSON (`Accept: application/json` or `/api/` path) |
+| --- | --- | --- |
+| No / expired session | `302` `/login?next=<path>` | `401 {"error":"unauthenticated"}` |
+| Reauth interval elapsed, provider healthy | `302` `/login?next=<path>` (session destroyed on callback completion) | `401 {"error":"reauthentication_required"}` |
+| Reauth due, provider degraded | `503` | `503 {"error":"authentication_unavailable"}` |
+| Session active | continue down the handler chain with role in context | same |
+| Role below the route's requirement | `403 {"error":"forbidden"}` (HTML: `403` page) | `403 {"error":"forbidden"}` |
+
+**Role requirement** for 002 routes: `/login`/`/oauth2/callback` = none; `/logout` = any authenticated role. Later specs declare per-route minimums (e.g. vault mutations require `user`; 001 status stays public). Both surfaces MUST return the same outcome (FR-006, SC-003) because one middleware makes the decision.
+
+### CSRF
+
+State-changing requests (non-GET/HEAD/OPTIONS) with a session cookie MUST include `X-CSRF-Token` matching the session token, or the CSRF-capable form field for the route. Missing/mismatch ⇒ `403 {"error":"csrf_check_failed"}`.
+
+## Security contract (FR-003/FR-009/SC-005)
+
+- Session cookie value is opaque; cookies never carry claims.
+- Logs may contain: outcome codes (`invalid_login_transaction`, `forbidden`), session IDs (rotating), subjects only at debug level. Never tokens, JWKS payloads, `groups` arrays, or raw claims.
+- `/status` exposes discovery state, issuer, client ID, role-group names, and `active_sessions` — already the 001 allowlist; extended with no new sensitive fields.

@@ -1,133 +1,57 @@
-# Research: OIDC Sign-In and Role Access
+# Phase 0 Research: OIDC Sign-In and Role Access
 
-## 1. OIDC provider behavior and flow
+## D1 — Implement OIDC with the standard library, not `go-oidc`
 
-**Decision**: Use one configured OIDC issuer with Authorization Code flow,
-S256 PKCE, confidential-client authentication using `client_secret_basic`, and
-the scopes `openid profile email groups` plus explicitly configured extras.
-Use discovery only after checking its issuer exactly matches the configured
-issuer. Validate the ID-token signature against discovered JWKS and validate
-issuer, audience, expiry, nonce, subject, and the one-time login transaction
-before creating a local session.
+**Decision**: Implement discovery, S256 PKCE, RS256 ID-token validation, and token exchange directly on the standard library, modeled on the live-verified pattern in `tools/oidcverify/main.go`.
 
-**Rationale**: The Pocket ID verification spike observed these capabilities in
-the deployed provider, including RS256, S256 PKCE, ID-token groups, UserInfo,
-and RP-initiated logout. Production is a confidential client even though the
-disposable spike used a public client. Keeping issuer and callback validation
-strict avoids trusting discovery or redirect data from a request.
+**Rationale**: The spike tool already proves the full flow against Pocket ID with zero dependencies, and the flow we need is narrow (one provider, one client, code flow only). `coreos/go-oidc` would add a dependency tree and its own abstractions for generality we do not use (Principle III; the repository has no third-party dependencies to date). Validation rules mirror `oidcverify`: exact-issuer equality, endpoint-origin validation against the issuer, `aud` contains client ID, `exp`/`iat` window, `nonce` equality, and signature verification against the keyed JWKS kid.
 
-**Alternatives considered**: Implicit flow (does not meet the protected
-server-side code flow requirement); public client (not the production
-deployment model); UserInfo-only groups (an extra request without benefit for
-the verified provider, retained as a configurable claim source for portability).
+**Consequence**: We own JWT/JWKS edge cases. Mitigate with a dedicated test matrix (wrong signature, unknown kid, expired token, issuer mismatch, audience mismatch, missing `exp`, non-string `groups`).
 
-## 2. Provider integration and dependency boundary
+## D2 — Sessions: in-memory, opaque, three independent timers
 
-**Decision**: Use an OIDC client implementation that performs standards-based
-discovery, code exchange, JWKS signature verification, and claim validation;
-keep application-specific checks (configured issuer/audience, nonce, state,
-one-time transaction, and role mapping) explicit in the `auth` boundary. Select
-and pin the smallest maintained Go dependency when implementation tasks are
-prepared. Do not reuse the standalone `tools/oidcverify` as a runtime library.
+**Decision**: Server-side session store in memory. IDs are 32 random bytes, base64url-encoded (cookie-safe, no structure that leaks anything). Each session records `AuthenticatedAt` (absolute expiry anchor), `LastUsedAt` (idle expiry), `LastVerifiedAt` (reauth anchor), identity display fields (subject, user claim value), and resolved role. Lookup enforces idle timeout, absolute lifetime, and — in combination with provider health — the reauth interval (FR-012); a background sweeper removes expired entries so `ActiveSessions` for `/status` stays accurate.
 
-**Rationale**: The verifier is a standard-library-only spike tool and its
-purpose is evidence collection, while the production path needs maintained
-protocol handling and testable application policy. Explicit application
-checks make the security contract reviewable and provider-independent.
+**Rationale**: Sessions are operational data, so Principle V does not require persistence. Persistence would require at-rest key management for replay resistance and buys nothing for a single-replica service whose restart is already disruptive (vault lock is exclusive). Rotation means replacing the cookie value on every successful reauth, not per request; the old ID is destroyed immediately.
 
-**Alternatives considered**: Hand-implement all OIDC/JWT/JWKS behavior in the
-daemon (too much security-sensitive protocol code); couple the daemon to a
-provider-specific SDK (reduces portability).
+**Consequence**: Process restart signs everyone out (documented in quickstart). Idle (1h), absolute (8h), and reauth (1h) defaults come from existing config keys; validation already ensures idle ≤ absolute and reauth ≤ absolute.
 
-## 3. Group claims and role resolution
+## D3 — Login transactions: short TTL, single-use, in-memory
 
-**Decision**: Read the configured claim from the selected source (`id_token` by
-default; `userinfo` is supported), require a list of strings, and compare each
-value exactly against three distinct configured group names. Resolve overlap
-using administrator > user > viewer. Missing, malformed, or unmatched claims
-produce no access. Do not expose raw group values outside the role decision.
+**Decision**: `state`, `nonce`, `PKCE verifier`, redirect target, and creation time are stored in one transaction record keyed by `state`, TTL 10 minutes, deleted atomically when the callback reads it (sync.Once/CAS-style map delete).
 
-**Rationale**: ADR-0005 specifies exact matching and precedence. The Pocket ID
-spike observed `groups` as an array of strings in both ID token and UserInfo,
-with identical sets; the ID token avoids another network request.
+**Rationale**: Exactly the one-time-transaction semantics FR-002/SC-002 demand, plus replay rejection by construction. A cache-style store would permit double redemption under races, which is the exact edge case the spec calls out.
 
-**Alternatives considered**: Substring matching (permits accidental or
-malicious partial matches); implicit default-user role (violates least
-privilege); UserInfo as the default source (unnecessary request for the
-verified provider).
+**Consequence**: Concurrent duplicate callbacks: the first delete wins, the second finds no transaction and is rejected. Sweeper reaps abandoned transactions.
 
-## 4. Session and provider outage behavior
+## D4 — Test provider: `internal/braind/auth/authtest`, not per-test fakes
 
-**Decision**: Use a cryptographically random opaque cookie value referencing a
-server-side session record. Store only the minimum verified identity/display
-fields and role needed by the application, plus creation, last-activity,
-absolute-expiry, and last-verification times. Rotate the session identifier at
-authentication boundaries; invalidate it on logout. Apply idle and absolute
-expiry independently. A provider outage may use the last verified role only
-until `OIDC_REAUTH_INTERVAL` (one hour by default); afterward protected
-requests fail closed and the session is not extended. Restart clears sessions.
+**Decision**: A shared, exported simulated provider package (`auth/authtest`) that serves discovery, JWKS (rotatable RSA keys), authorize (with S256 verifier echo and redirect to caller-registered callback paths), token (issues RS256 JWTs with caller-controlled claims), and optionally logout. It exposes hooks to fail endpoints, rotate/destroy keys, expire tokens, and emit arbitrary claim shapes.
 
-**Rationale**: This meets FR-003, FR-007, FR-012, and the private single-replica
-deployment model without adding durable identity storage. The feature needs
-local work to continue briefly during outages, but must not extend stale
-authorization.
+**Rationale**: Principle I demands CI-testability without live services; one provider implementation keeps 003–005's future auth tests cheap and prevents fake-provider drift from real Pocket ID semantics recorded in spike SPK-002 (claim sources, `groups` claim, logout endpoint discovery).
 
-**Alternatives considered**: Provider tokens in browser cookies (exposes
-credentials and claims); durable shared session database (unneeded for the
-single replica and creates another operational dependency); unlimited stale
-session use (violates fail-closed reauthentication).
+**Consequence**: The fake is test infrastructure but lives in-repo under a non-`_test` path so `internal/braind` daemon tests can reuse it; it must never be imported by production code (enforced by keeping it dependency-light and documented).
 
-## 5. Browser and JSON authorization, CSRF, and logout
+## D5 — Role resolution: one pure function, exact match, deny by default
 
-**Decision**: Resolve the session and role once through shared middleware and
-call the same explicit authorization policy for browser and JSON routes. Keep
-v1 JSON authentication on the browser session cookie; do not add application
-bearer tokens. Protect browser state changes using a synchronizer CSRF token
-bound to the server-side session, checking it on unsafe methods. Use
-SameSite cookies and restrictive cookie attributes. Logout invalidates local
-state first and uses the discovered end-session endpoint when available, with
-only a preconfigured/validated post-logout redirect URI.
+**Decision**: `auth.ResolveRole(groups []string, cfg RoleConfig) Role` — a named pure function returning administrator > user > viewer > no-access by exact, case-sensitive string equality against the configured distinct groups (config validation already requires distinctness). A malformed or absent groups claim yields no access, not a zero-value role (FR-005, SC-001).
 
-**Rationale**: ADR-0004 requires shared behavior and FR-008 requires CSRF
-protection. Local invalidation must not depend on the provider being online.
-Ordinary HTTP forms remain functional without JavaScript.
+**Rationale**: Centralizes ADR-0005 precedence so browser and JSON paths cannot diverge (FR-006). Pure function = trivially exhaustive tests (valid, missing, duplicated, partially matching like `"access-brain-use"`, nested/wrong-type claims).
 
-**Alternatives considered**: Separate browser and API policy (drift risk);
-bearer tokens (explicitly deferred by FR-011); relying on SameSite alone for
-CSRF (does not satisfy the stated explicit CSRF requirement); provider logout
-before local invalidation (provider outage would retain a valid local session).
+## D6 — CSRF: SameSite=Lax cookie + per-session token on state-changing requests
 
-## 6. Configuration, readiness, and diagnostics
+**Decision**: Session cookie is `HttpOnly`, `Secure`, `SameSite=Lax`. State-changing requests (methods other than GET/HEAD/OPTIONS, and any request whose cookie-authenticated session could mutate state) must carry a CSRF token issued with the session and validated by the auth middleware; server-rendered forms embed it. v1 state-changing surfaces are `POST /logout` (and future vault mutations inherit the same middleware).
 
-**Decision**: Keep provider, client, claim, group, cookie/session, and trusted
-proxy settings in validated process configuration. Never include the client
-secret, tokens, authorization codes, raw claims, or provider response bodies
-in logs/status/errors. Provider discovery or verification failures do not
-change readiness while local vault access is healthy.
+**Rationale**: SameSite=Lax blocks cross-site POSTs at the browser but is not a server-side guarantee (non-browser clients, older browsers). A token bound to the session is the minimal explicit defense FR-008 names; double-submit without a session-bound token is weaker and adds no simplicity.
 
-**Rationale**: The existing configuration package already has OIDC/session
-settings, secret-aware logging, trusted proxy configuration, and readiness
-separated from remote integrations. The new behavior should complete these
-boundaries rather than invent another config system.
+## D7 — Provider-outage policy: reauth-interval gate with an explicit health view
 
-**Alternatives considered**: Provider secrets in request-visible settings or
-status (leaks credentials); tying readiness to live identity-provider
-availability (blocks local use during upstream outage).
+**Decision**: Sessions do not carry provider tokens; verification is complete at login. Per FR-012, when the reauth interval elapses the middleware treats the session as `reauthRequired`: protected requests redirect to `/login` (browser) or return `401 {"error":"reauthentication_required"}` (JSON). While the provider is healthy this yields a new session with re-resolved claims; while it is unreachable, no session is created and the protected request returns `503 {"error":"authentication_unavailable"}` — the session's expiry is never extended past the gate (SC-004). Provider health is a coarse in-memory view (`healthy | degraded | unknown`) updated by the last successful discovery/token/JWKS operation; discovery failure at startup is retried but MUST NOT affect `/readyz` (FR-013, ADR-0003).
 
-## Repository evidence
+**Rationale**: Re-verifying every request would make request latency depend on the provider and violate FR-013's intent. The interval is the one place the spec permits cached authorization, and it is bounded by config. The 503 outcome distinguishes "you are not authenticated" (401) from "we cannot safely re-check right now" so clients do not interpret outage as failure of their own identity.
 
-- `docs/adr/0005-oidc-group-based-roles.md`: one provider, exact group mapping,
-  role precedence, and no local accounts.
-- `docs/adr/0004-html-and-api-share-behavior.md`: shared browser/API domain
-  behavior and shared server-side sessions.
-- `docs/spikes/spk-002-pocket-id.md`: Pocket ID discovery and live flow,
-  including RS256, S256 PKCE, ID-token groups, UserInfo, and logout support.
-- `internal/braind/config/config.go`: existing OIDC, role-group, cookie
-  lifetime, reauthentication, and trusted-proxy configuration surface.
-- `.specify/memory/constitution.md`: Go backend, server-rendered HTMX frontend,
-  independent tests, explicit policy, and Markdown vault as canonical note
-  content.
+## D8 — Route surface: mount auth handlers under explicit paths, keep probes public
 
-No unresolved requirement clarification remains. The concrete Go OIDC module
-and cookie name/attributes are implementation choices to be pinned during
-task execution and covered by the contracts here.
+**Decision**: New daemon routes: `GET /login` (sign-in prompt), `GET /oauth2/callback` (redirect target), `POST /logout`. Protected routes (all vault/API routes from later specs) sit behind the `auth.RequireAuth` middleware; probes (`/healthz`, `/readyz`), static assets, `/status`, and the landing page stay public.
+
+**Rationale**: Probes must stay anonymous for Kubernetes (ADR-0003) and `/status` must remain operator-visible (001 contract). Keeping the landing page public preserves the 009 contract; authentication enforcement applies to the vault surface where 003 begins.
