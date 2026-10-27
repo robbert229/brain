@@ -89,13 +89,16 @@ func newAuthSurface(processConfig config.Config, logger *slog.Logger) (*authSurf
 	}, nil
 }
 
-// register mounts the sign-in routes. Protected vault routes from spec 003+ sit
-// behind middleware and share this session store, so both surfaces reach the
-// same decision (FR-006).
+// register mounts the sign-in surface. The anonymous entry points and the
+// policy-gated routes are registered separately so spec 003+ can add protected
+// vault and API routes through Handler.RequireAuth without touching probes,
+// status, or the landing page.
 func (s *authSurface) register(mux *http.ServeMux) {
-	if s != nil {
-		s.handler.Register(mux)
+	if s == nil {
+		return
 	}
+	s.handler.RegisterPublic(mux)
+	s.handler.RegisterProtected(mux)
 }
 
 // watch performs the first discovery attempt off the startup path and then keeps

@@ -104,14 +104,6 @@ func NewHandler(config HandlerConfig) (*Handler, error) {
 	return &Handler{config: config, prompt: parsed, framesBlock: frames}, nil
 }
 
-// Register mounts the authentication routes. The daemon registers these only
-// when OIDC is enabled (contracts/http.md).
-func (h *Handler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /login", h.handleLogin)
-	mux.HandleFunc("GET /oauth2/callback", h.handleCallback)
-	mux.HandleFunc("POST /logout", h.handleLogout)
-}
-
 // handleLogin issues a login transaction and either renders the sign-in prompt
 // or redirects straight to the provider.
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -333,10 +325,12 @@ func mergeGroupsClaims(idClaims, userinfoClaims map[string]any, groupsClaim stri
 
 func failureTitle(code string) string {
 	switch code {
-	case "access_denied":
+	case "access_denied", "forbidden":
 		return "Access denied"
 	case "csrf_check_failed":
 		return "Request rejected"
+	case "unauthenticated", "reauthentication_required":
+		return "Sign-in required"
 	case "authentication_unavailable":
 		return "Sign-in unavailable"
 	default:

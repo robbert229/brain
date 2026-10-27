@@ -69,11 +69,17 @@ func TestAuthRoutesServeProviderWhenOIDCEnabled(t *testing.T) {
 		t.Fatalf("status = %d with OIDC enabled", recorder.Code)
 	}
 
-	// Sign-out without a session clears nothing and leaks nothing.
+	// Sign-out is a protected route: without a session it sends the browser to
+	// sign in, and it still discloses nothing beyond the redirect.
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/login", nil))
 	recorder = httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/logout", nil))
-	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("logout without a session = %d, want 204", recorder.Code)
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("logout without a session = %d, want 302", recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), "braind_session") {
+		t.Fatal("denied logout disclosed session material")
 	}
 }
 
@@ -104,6 +110,38 @@ func TestProviderOutageLeavesReadinessAlone(t *testing.T) {
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("readiness followed the provider outage: %d", recorder.Code)
+	}
+}
+
+func TestProtectedRoutesApplyPolicyAtTheDaemon(t *testing.T) {
+	simulator := authtest.New(t)
+	surface := enableOIDC(t, simulator)
+	handler := newHandler(handlerState{auth: surface})
+
+	// Sign-out sits behind the shared policy, so an anonymous attempt is denied
+	// the same way on either surface rather than silently doing nothing.
+	for _, surfaceRequest := range []struct {
+		accept  string
+		request int
+	}{
+		{accept: "text/html", request: http.StatusFound},
+		{accept: "application/json", request: http.StatusUnauthorized},
+	} {
+		recorder := httptest.NewRecorder()
+		logout := httptest.NewRequest(http.MethodPost, "/logout", nil)
+		logout.Header.Set("Accept", surfaceRequest.accept)
+		handler.ServeHTTP(recorder, logout)
+		if recorder.Code != surfaceRequest.request {
+			t.Fatalf("%s logout = %d, want %d", surfaceRequest.accept, recorder.Code, surfaceRequest.request)
+		}
+	}
+
+	// Unknown paths keep returning 404: the protected surface must not swallow
+	// the public 001 routing contract behind an authentication redirect.
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/nope", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("unknown path = %d, want 404", recorder.Code)
 	}
 }
 

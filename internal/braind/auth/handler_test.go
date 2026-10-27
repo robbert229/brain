@@ -17,6 +17,7 @@ import (
 
 type fixture struct {
 	handler      http.Handler
+	signer       *auth.Handler
 	simulator    *authtest.Provider
 	sessions     *auth.SessionStore
 	transactions *auth.TransactionStore
@@ -86,7 +87,7 @@ func newFixture(t *testing.T, configure func(*authtest.Provider), mutate func(*a
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	return &fixture{handler: mux, simulator: simulator, sessions: sessions, transactions: transactions, provider: provider, clock: clock}
+	return &fixture{handler: mux, signer: handler, simulator: simulator, sessions: sessions, transactions: transactions, provider: provider, clock: clock}
 }
 
 // startSignIn requests the prompt and returns the provider authorization URL as
@@ -474,12 +475,29 @@ func TestSignoutAcceptsHeaderToken(t *testing.T) {
 	}
 }
 
-func TestSignoutWithoutSessionIsQuiet(t *testing.T) {
+func TestSignoutWithoutSessionIsNotAuthorized(t *testing.T) {
 	fixture := newFixture(t, nil, nil)
+
+	// Sign-out is a protected route, so an anonymous visitor recovers by signing
+	// in, and a client asking for JSON gets the same decision as an outcome code.
 	recorder := httptest.NewRecorder()
 	fixture.handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/logout", nil))
-	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("expected 204, got %d", recorder.Code)
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("browser sign-out without a session = %d, want 302", recorder.Code)
+	}
+	if location := recorder.Header().Get("Location"); location != "/login?next=%2Flogout" {
+		t.Fatalf("unexpected redirect %q", location)
+	}
+
+	recorder = httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	request.Header.Set("Accept", "application/json")
+	fixture.handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("json sign-out without a session = %d, want 401", recorder.Code)
+	}
+	if body := recorder.Body.String(); body != `{"error":"unauthenticated"}` {
+		t.Fatalf("unexpected json outcome %q", body)
 	}
 }
 

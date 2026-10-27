@@ -29,8 +29,8 @@ Tests live next to their package (`_test.go` files in the same package).
 
 **Purpose**: Prepare the tree; the project and 001 foundation already exist.
 
-- [ ] T001 Create feature branch `002-oidc-access` from `001-daemon-foundation` HEAD (that branch carries the readiness/status surface 002 wires into; rebase onto `main` if 001 merges first)
-- [ ] T002 Run baseline `go test ./...` and confirm all 001 foundation and landing-page tests pass before any change (record result)
+- [X] T001 Create feature branch `002-oidc-access` from `001-daemon-foundation` HEAD (that branch carries the readiness/status surface 002 wires into; rebase onto `main` if 001 merges first)
+- [X] T002 Run baseline `go test ./...` and confirm all 001 foundation and landing-page tests pass before any change (record result)
 
 ---
 
@@ -89,15 +89,15 @@ group claims to the same policy used by browser and API scenarios (SC-003).
 
 ### Tests for User Story 2 (written before implementation)
 
-- [ ] T017 [P] [US2] Write `internal/braind/auth/middleware_test.go`: anonymous protected request → 302 with `next` for HTML accept, 401 `unauthenticated` for JSON accept; expired session → same; active session reaches the handler; role-below-requirement → 403 `forbidden` on both surfaces; multi-group session resolves by precedence (US2-AC2); identical outcomes across `Accept: text/html` vs `application/json` for the same role/action pair (US2-AC4)
-- [ ] T018 [P] [US2] Write `internal/braind/auth/csrf_test.go`: state-changing request with a session but no `X-CSRF-Token` → 403 `csrf_check_failed`; mismatched token → 403; valid token passes; GET requests exempt (FR-008)
+- [X] T017 [P] [US2] Write `internal/braind/auth/middleware_test.go`: anonymous protected request → 302 with `next` for HTML accept, 401 `unauthenticated` for JSON accept; expired session → same; active session reaches the handler; role-below-requirement → 403 `forbidden` on both surfaces; multi-group session resolves by precedence (US2-AC2); identical outcomes across `Accept: text/html` vs `application/json` for the same role/action pair (US2-AC4)
+- [X] T018 [P] [US2] Write `internal/braind/auth/csrf_test.go`: state-changing request with a session but no `X-CSRF-Token` → 403 `csrf_check_failed`; mismatched token → 403; valid token passes; GET requests exempt (FR-008)
 
 ### Implementation for User Story 2
 
-- [ ] T019 [US2] Implement `internal/braind/auth/middleware.go` `RequireAuth(policy)` — a decorator that looks up the session, applies `active|expired|reauthRequired` outcomes, compares `Session.Role` against the route's minimum role, and stores the identity in request context via `ContextWithIdentity(r)`/`FromContext(ctx)` for later vault specs (FR-006)
-- [ ] T020 [US2] Implement CSRF validation inside `middleware.go`: for non-GET/HEAD/OPTIONS requests carrying a session cookie, require the session `CSRFToken` in the `X-CSRF-Token` header (constant-time compare), 403 otherwise; skip when no session exists (login/logout transitions) — no new config keys (research D6)
-- [ ] T021 [US2] Apply the middleware in `internal/braind/run.go` so protected vault/API routes added by 003+ inherit it: mount `RequireAuth` around a `protectedMux` that currently registers only `/logout` (POST, any authenticated role) while probes/status/landing stay outside it. Document the per-route minimum-role convention in `contracts/http.md` terms inside `middleware.go`
-- [ ] T022 [US2] Test policy parity across surfaces in `internal/braind/auth/policy_test.go`: drive the same handler through HTML-style and JSON-style requests for each of {none, viewer, user, admin} × {allow-user, allow-admin, public} and assert byte-identical decisions (SC-003)
+- [X] T019 [US2] Implement `internal/braind/auth/middleware.go` `RequireAuth(policy)` — a decorator that looks up the session, applies `active|expired|reauthRequired` outcomes, compares `Session.Role` against the route's minimum role, and stores the identity in request context via `ContextWithIdentity(r)`/`FromContext(ctx)` for later vault specs (FR-006)
+- [X] T020 [US2] Implement CSRF validation inside `middleware.go`: for non-GET/HEAD/OPTIONS requests carrying a session cookie, require the session `CSRFToken` in the `X-CSRF-Token` header (constant-time compare), 403 otherwise; skip when no session exists (login/logout transitions) — no new config keys (research D6)
+- [X] T021 [US2] Apply the middleware in `internal/braind/run.go` so protected vault/API routes added by 003+ inherit it: mount `RequireAuth` around a `protectedMux` that currently registers only `/logout` (POST, any authenticated role) while probes/status/landing stay outside it. Document the per-route minimum-role convention in `contracts/http.md` terms inside `middleware.go`
+- [X] T022 [US2] Test policy parity across surfaces in `internal/braind/auth/policy_test.go`: drive the same handler through HTML-style and JSON-style requests for each of {none, viewer, user, admin} × {allow-user, allow-admin, public} and assert byte-identical decisions (SC-003)
 
 **Checkpoint**: One policy decision serves both surfaces; role precedence and CSRF verified.
 
