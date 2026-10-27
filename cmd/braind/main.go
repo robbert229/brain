@@ -9,11 +9,14 @@ import (
 	"github.com/johnrowl/brain/internal/braind"
 )
 
-var version = "dev"
+var (
+	version = "dev"
+	commit  = ""
+)
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	os.Exit(braind.Run(ctx, os.Args[1:], version, os.Stdout, os.Stderr))
+	os.Exit(braind.Run(ctx, os.Args[1:], version, commit, os.Stdout, os.Stderr))
 }

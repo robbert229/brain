@@ -32,7 +32,7 @@ func TestRunLoadsConfigurationFromEnvFile(t *testing.T) {
 	cancel()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := run(ctx, nil, "test", &stdout, &stderr, lookup)
+	exitCode := run(ctx, nil, "test", "test-commit", &stdout, &stderr, lookup)
 
 	if strings.Contains(stderr.String(), datalock.ErrUnsupported.Error()) {
 		t.Skip(datalock.ErrUnsupported)
@@ -65,7 +65,7 @@ func TestRunEntryPointLoadsEnvFile(t *testing.T) {
 	cancel()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	exitCode := Run(ctx, nil, "test", &stdout, &stderr)
+	exitCode := Run(ctx, nil, "test", "test-commit", &stdout, &stderr)
 
 	if strings.Contains(stderr.String(), datalock.ErrUnsupported.Error()) {
 		t.Skip(datalock.ErrUnsupported)

@@ -24,6 +24,9 @@ func TestLoadDefaultsWithRequiredValues(t *testing.T) {
 	if len(server.TrustedProxyCIDRs) != 0 {
 		t.Fatalf("unexpected trusted proxy CIDRs: %v", server.TrustedProxyCIDRs)
 	}
+	if server.ShutdownTimeout != DefaultShutdownTimeout {
+		t.Fatalf("unexpected shutdown timeout default: %v", server.ShutdownTimeout)
+	}
 	if got := config.Vault(); got.DataPath != "/data" || got.VaultPath != "/data/vault" || got.ReadOnly || got.MaxNoteBytes != 2*1024*1024 {
 		t.Fatalf("unexpected vault defaults: %+v", got)
 	}
@@ -62,6 +65,7 @@ func TestLoadOverridesAndReturnsDefensiveCopies(t *testing.T) {
 		EnvSearchMaxBytes:          "64MiB",
 		EnvSearchTimeout:           "3s",
 		EnvSearchMaxResults:        "25",
+		EnvShutdownTimeout:         "15s",
 		EnvGitBackupEnabled:        "false",
 		EnvGitDir:                  "/srv/brain/git/vault.git",
 		EnvGitRemoteURL:            "",
@@ -109,6 +113,9 @@ func TestLoadOverridesAndReturnsDefensiveCopies(t *testing.T) {
 	}
 	wantPrefixes := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("2001:db8::/32")}
 	server := config.Server()
+	if server.ShutdownTimeout != 15*time.Second {
+		t.Fatalf("unexpected shutdown timeout override: %v", server.ShutdownTimeout)
+	}
 	if fmt.Sprint(server.TrustedProxyCIDRs) != fmt.Sprint(wantPrefixes) {
 		t.Fatalf("unexpected trusted proxies: %v", server.TrustedProxyCIDRs)
 	}
@@ -157,6 +164,9 @@ func TestLoadRejectsMalformedSettings(t *testing.T) {
 		{name: "byte size", key: EnvMaxNoteBytes, value: "2MB"},
 		{name: "positive integer", key: EnvSearchMaxFiles, value: "0"},
 		{name: "duration", key: EnvSearchTimeout, value: "soon"},
+		{name: "shutdown timeout zero", key: EnvShutdownTimeout, value: "0s"},
+		{name: "shutdown timeout negative", key: EnvShutdownTimeout, value: "-1s"},
+		{name: "shutdown timeout unparseable", key: EnvShutdownTimeout, value: "banana"},
 		{name: "CIDR", key: EnvTrustedProxyCIDRs, value: "10.0.0.1"},
 		{name: "log level", key: EnvLogLevel, value: "trace"},
 		{name: "groups source", key: EnvOIDCGroupsSource, value: "both"},

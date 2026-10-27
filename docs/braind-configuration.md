@@ -8,6 +8,7 @@ is validated at startup; secret values are redacted from diagnostics.
 | --- | --- | --- |
 | `BRAIND_LISTEN_ADDR` | `0.0.0.0:8080` | HTTP listen address. |
 | `BRAIND_EXTERNAL_URL` | `https://brain.lab.johnrowley.co` | Canonical external origin. |
+| `BRAIND_SHUTDOWN_TIMEOUT` | `5s` | Maximum time to drain in-flight requests during graceful shutdown. Positive Go duration; the Kubernetes `terminationGracePeriodSeconds` should exceed it. |
 | `BRAIND_DATA_PATH` | `/data` | Persistent application root and process-lock location. |
 | `BRAIND_VAULT_PATH` | `/data/vault` | Markdown vault root. |
 | `BRAIND_READ_ONLY` | `false` | Disable filesystem mutations. |
