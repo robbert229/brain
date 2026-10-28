@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/robbert229/brain/compare/v0.2.0...v0.3.0) (2026-10-27)
+
+
+### Features
+
+* **auth:** add OIDC sign-in, role policy, and outage gates (spec 002) ([#22](https://github.com/robbert229/brain/issues/22)) ([edde2b9](https://github.com/robbert229/brain/commit/edde2b9d34b9468c8c739ce0081297b2cf68a800))
+* **braind:** add readiness, status, and shutdown bound (spec 001) ([#20](https://github.com/robbert229/brain/issues/20)) ([65a8004](https://github.com/robbert229/brain/commit/65a8004fa7b68537ea7752842f40a11dd77b2dde))
+
 ## [0.2.0](https://github.com/robbert229/brain/compare/v0.1.0...v0.2.0) (2026-10-27)
 
 
