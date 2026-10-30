@@ -4,20 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.ProductName}}: {{.Tagline}}</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
-  <main id="main">
-    <header>
+  <main id="main" class="container">
+    <hgroup>
       <h1>{{.ProductName}}</h1>
       <p class="tagline">{{.Tagline}}</p>
-    </header>
+    </hgroup>
     <p class="description">{{.Description}}</p>
-    <section class="status" aria-labelledby="status-heading">
+    <article aria-labelledby="status-heading">
       <h2 id="status-heading">Status</h2>
       <p>{{.ConstructionNotice}}</p>
-    </section>
+    </article>
   </main>
   <script src="/static/htmx.min.js"></script>
 </body>

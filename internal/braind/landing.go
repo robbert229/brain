@@ -1,10 +1,14 @@
 package braind
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"html/template"
 	"io/fs"
 	"net/http"
+	"path"
+	"strings"
 )
 
 // webAssets holds the landing page template and static assets. Embedding keeps
@@ -55,16 +59,26 @@ func serveLanding(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// staticAssetsHandler serves the embedded assets under /static/ with a short
-// public cache lifetime per contracts/http.md. Requests for files that do not
-// exist are handled by the file server as 404.
+// staticAssetsHandler serves the embedded assets under /static/. Embedded
+// files carry no modification time, so freshness rides on content-hash ETags:
+// Cache-Control no-cache forces revalidation on every use, and an unchanged
+// asset answers 304 with no body — deploys take effect immediately
+// (contracts/http.md). Requests for files that do not exist are handled by
+// the file server as 404.
 func staticAssetsHandler() http.Handler {
 	static, err := fs.Sub(webAssets, "webassets/static")
 	if err != nil {
 		panic(err) // the embedded layout is fixed at compile time
 	}
+	files := http.FileServer(http.FS(static))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=3600")
-		http.FileServer(http.FS(static)).ServeHTTP(w, r)
+		w.Header().Set("Cache-Control", "no-cache")
+		if name := strings.TrimPrefix(path.Clean(r.URL.Path), "/"); name != "" && name != "." {
+			if data, err := fs.ReadFile(static, name); err == nil {
+				sum := sha256.Sum256(data)
+				w.Header().Set("ETag", `"`+hex.EncodeToString(sum[:])+`"`)
+			}
+		}
+		files.ServeHTTP(w, r)
 	})
 }

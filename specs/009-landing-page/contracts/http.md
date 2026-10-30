@@ -11,7 +11,8 @@ the existing surface.
 | Method | Path | Status | Content-Type | Body / Notes |
 | --- | --- | --- | --- | --- |
 | `GET` | `/` | `200 OK` | `text/html; charset=utf-8` | Landing page, behind the shared authentication decision (spec 002): any verified session is served; anonymous browsers `302` to `/login?next=%2F` and API clients (`Accept: application/json`) get `401 {"error":"unauthenticated"}`. MUST contain the product name `brain`, the exact tagline `a second brain, powered by markdown`, and the under-construction notice. Headers: `Cache-Control: private, max-age=3600` (session-gated: never a shared cache); `Content-Security-Policy: default-src 'self'`. |
-| `GET` | `/static/style.css` | `200 OK` | `text/css; charset=utf-8` | Embedded stylesheet. |
+| `GET` | `/static/style.css` | `200 OK` | `text/css; charset=utf-8` | Embedded brand-layer stylesheet. |
+| `GET` | `/static/pico.min.css` | `200 OK` | `text/css; charset=utf-8` | Embedded, vendored Pico CSS `2.1.1` (ADR-0011). |
 | `GET` | `/static/htmx.min.js` | `200 OK` | `text/javascript; charset=utf-8` | Embedded, vendored htmx `2.0.11`. |
 | `GET` | `/healthz` | `200 OK` | `text/plain; charset=utf-8` | Unchanged: body `ok\n`, `Cache-Control: no-store`. |
 | any | `/` (other methods) | `405 Method Not Allowed` | — | Only `GET` is registered on `/`. |
@@ -35,7 +36,9 @@ the existing surface.
 
 - Landing page: `Cache-Control: private, max-age=3600` (static copy, but the
   route now requires a session, so only private caches may retain it).
-- Static assets: `Cache-Control: public, max-age=3600` with correct content types.
+- Static assets: `Cache-Control: no-cache` with a content-hash `ETag`
+  (embedded files carry no modification time); an unchanged asset revalidates
+  to `304 Not Modified`, so a deploy is seen immediately. Correct content types.
 - `/healthz`: `Cache-Control: no-store` (operational — unchanged).
 
 ## Verification mapping

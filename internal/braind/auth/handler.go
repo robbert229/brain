@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/subtle"
+	"embed"
 	"errors"
 	"fmt"
 	"html/template"
@@ -22,27 +23,27 @@ const (
 	CSRFHeader = "X-CSRF-Token"
 	// CSRFFormField is the form field name accepted for progressive enhancement.
 	CSRFFormField = "csrf_token"
-
-	promptTemplate = `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Sign in</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-<body>
-<main>
-<h1>Sign in to Brain</h1>
-{{if .Error}}<p role="alert">Sign-in could not be completed ({{.Error}}).</p>{{end}}
-<p>Use your organization identity to continue.</p>
-<p><a href="{{.AuthorizeURL}}">Sign in</a></p>
-</main>
-</body>
-</html>
-`
-	framesForbiddenTemplate = `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>{{.}}</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
-<body><main><h1>{{.}}</h1></main></body>
-</html>
-`
 )
+
+// webAssets holds the sign-in page templates. Embedding keeps the binary
+// self-contained and uses the same mechanism as the landing page
+// (landing.go): parsed once at init, rendered to text/html, and styled by the
+// shared /static/style.css the daemon serves.
+//
+//go:embed webassets
+var webAssets embed.FS
+
+var (
+	loginTemplate = template.Must(template.ParseFS(webAssets, "webassets/login.html.tmpl"))
+	// failureTemplate renders browser-facing failure pages; the JSON shape of
+	// the same outcome is served instead to API callers (respondFailure).
+	failureTemplate = template.Must(template.ParseFS(webAssets, "webassets/failure.html.tmpl"))
+)
+
+// failurePage is the complete data context for failureTemplate.
+type failurePage struct {
+	Title string
+}
 
 // HandlerConfig configures the sign-in HTTP surface.
 type HandlerConfig struct {
@@ -62,9 +63,7 @@ type HandlerConfig struct {
 
 // Handler serves /login, /oauth2/callback, and /logout.
 type Handler struct {
-	config      HandlerConfig
-	prompt      *template.Template
-	framesBlock *template.Template
+	config HandlerConfig
 }
 
 var (
@@ -94,20 +93,20 @@ func NewHandler(config HandlerConfig) (*Handler, error) {
 	if config.Clock == nil {
 		config.Clock = time.Now
 	}
-	parsed, err := template.New("login").Parse(promptTemplate)
-	if err != nil {
-		return nil, fmt.Errorf("auth: login template: %w", err)
-	}
-	frames, err := template.New("message").Parse(framesForbiddenTemplate)
-	if err != nil {
-		return nil, fmt.Errorf("auth: message template: %w", err)
-	}
-	return &Handler{config: config, prompt: parsed, framesBlock: frames}, nil
+	return &Handler{config: config}, nil
 }
 
 // handleLogin issues a login transaction and either renders the sign-in prompt
 // or redirects straight to the provider.
 func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
+	// A signed-in visitor reaching /login followed a stale bookmark, the back
+	// button, or a leftover ?login_error from an earlier attempt; send them on
+	// to where they meant to go instead of offering a second sign-in.
+	if _, outcome := h.LookupSession(r); outcome == OutcomeActive {
+		w.Header().Set("Cache-Control", "no-store")
+		http.Redirect(w, r, SafeRedirect(r.URL.Query().Get("next")), http.StatusFound)
+		return
+	}
 	transaction, ok := h.config.Transactions.Issue(r.URL.Query().Get("next"))
 	if !ok {
 		h.respondFailure(w, r, http.StatusServiceUnavailable, "authentication_unavailable")
@@ -125,7 +124,8 @@ func (h *Handler) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	if err := h.prompt.Execute(w, struct {
+	w.Header().Set("Content-Security-Policy", "default-src 'self'")
+	if err := loginTemplate.Execute(w, struct {
 		AuthorizeURL string
 		Error        string
 	}{AuthorizeURL: authorizeURL, Error: sanitizedError(r.URL.Query().Get("login_error"))}); err != nil {
@@ -306,8 +306,9 @@ func (h *Handler) respondFailure(w http.ResponseWriter, r *http.Request, status 
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'")
 	w.WriteHeader(status)
-	_ = h.framesBlock.Execute(w, failureTitle(code))
+	_ = failureTemplate.Execute(w, failurePage{Title: failureTitle(code)})
 }
 
 // mergeGroupsClaims prefers the configured group source while keeping identity

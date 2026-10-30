@@ -353,7 +353,9 @@ func sessionCookie(recorder *httptest.ResponseRecorder) (*http.Cookie, bool) {
 
 // daemonAuthorizeLink finds the provider link the sign-in prompt hands the
 // browser, which is the only sign-in path a real user has.
-var daemonAuthorizeLink = regexp.MustCompile(`href="([^"]+)"`)
+// daemonAuthorizeLink matches the prompt's sign-in anchor specifically: the
+// pages' heads also carry the shared stylesheet href.
+var daemonAuthorizeLink = regexp.MustCompile(`<a role="button" class="sign-in" href="([^"]+)">Sign in</a>`)
 
 // enableOIDC configures a daemon surface against the simulated provider. The
 // public origin stays HTTPS because that is what configuration validation
