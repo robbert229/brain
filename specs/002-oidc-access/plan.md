@@ -6,13 +6,13 @@
 
 ## Summary
 
-Add OpenID Connect sign-in to `braind` using one configured provider (Authorization Code flow with S256 PKCE, RS256 ID-token validation against discovered JWKS), an opaque server-side session store, and a single role policy that maps exact-match groups claims to administrator/user/viewer. Authentication is a new `internal/braind/auth` package mounted between the existing `logging.HTTPMiddleware` and the daemon mux, with a middleware that resolves the session role once per request so browser and JSON surfaces share one decision (FR-006, ADR-0004/ADR-0005). Provider interaction reuses the stdlib-only pattern proven in `tools/oidcverify`; tests use an in-repo simulated provider so the feature is CI-testable without a live identity service (Principle I).
+Add OpenID Connect sign-in to `braind` using one configured provider (Authorization Code flow with S256 PKCE, RS256 ID-token validation against discovered JWKS), an opaque server-side session store, and a single role policy that maps exact-match groups claims to administrator/user/viewer. Authentication is a new `internal/braind/auth` package mounted between the existing `logging.HTTPMiddleware` and the daemon mux, with a middleware that resolves the session role once per request so browser and JSON surfaces share one decision (FR-006, ADR-0004/ADR-0005). Provider interaction uses `go-oidc` and `oauth2` behind a small facade (ADR-0010); tests use an in-repo simulated provider so the feature is CI-testable without a live identity service (Principle I).
 
 ## Technical Context
 
-**Language/Version**: Go 1.22 (stdlib only; no new module dependencies)
+**Language/Version**: Go 1.26 (tracks the minimum of `go-oidc`/`oauth2`, added in [ADR-0010](../../docs/adr/0010-adopt-standard-oidc-libraries.md))
 
-**Primary Dependencies**: None beyond the standard library (`crypto/rsa`, `encoding/base64`, `encoding/json`, `net/http`, `crypto/rand`, `net/http/cookiejar` not needed server-side). `tools/oidcverify/main.go` documents the proven discovery/PKCE/JWKS/token-exchange pattern.
+**Primary Dependencies**: `github.com/coreos/go-oidc/v3` (discovery, JWKS, ID-token verification) and `golang.org/x/oauth2` (authorization-code flow, PKCE, token exchange) on top of the standard library. `tools/oidcverify/main.go` remains the dependency-free independent verifier for real providers.
 
 **Storage**: None. Sessions and login transactions are in-memory (operational data — Principle V explicitly excludes them from the vault-as-truth rule). A restart signs everyone out; that is acceptable for v1 (documented).
 
@@ -36,7 +36,7 @@ Add OpenID Connect sign-in to `braind` using one configured provider (Authorizat
 | --- | --- |
 | I. Independently testable | PASS — simulated provider package exercises sign-in, callback rejection, expiry, replay, outage, and role policy in CI. |
 | II. Explicit business logic | PASS — role resolution is a named pure function (`ResolveRole`); session/CSRF/outage rules live in named middleware steps, each with direct tests. |
-| III. Simplicity over abstraction | PASS — stdlib-only OIDC (no go-oidc dependency, rejected as unused generality); one auth package; no framework. |
+| III. Simplicity over abstraction | PASS — OIDC protocol mechanics delegated to `go-oidc`/`oauth2` (ADR-0010, superseding the original stdlib-only decision); one auth package; no framework. |
 | IV. Go backend, HTMX frontend | PASS — sign-in/out are ordinary form POST/redirect flows; login landing stays server-rendered HTML. |
 | V. Markdown single source of truth | PASS (N/A) — sessions/transactions are operational data, explicitly out of scope of the principle. |
 

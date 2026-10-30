@@ -37,7 +37,6 @@ const (
 	EnvGitSSHKeyPath           = "BRAIND_GIT_SSH_KEY_PATH"
 	EnvGitKnownHostsPath       = "BRAIND_GIT_KNOWN_HOSTS_PATH"
 	EnvLogLevel                = "BRAIND_LOG_LEVEL"
-	EnvOIDCEnabled             = "OIDC_ENABLED"
 	EnvOIDCConfigurationURL    = "OIDC_CONFIGURATION_URL"
 	EnvOIDCClientID            = "OIDC_CLIENT_ID"
 	EnvOIDCClientSecret        = "OIDC_CLIENT_SECRET"
@@ -118,8 +117,9 @@ type Backup struct {
 	KnownHostsPath string
 }
 
+// OIDC is mandatory: the daemon always authenticates its sign-in surface
+// against exactly one provider, so there is no enable switch.
 type OIDC struct {
-	Enabled          bool
 	ConfigurationURL string
 	ClientID         string
 	ClientSecret     string
@@ -245,7 +245,6 @@ func Load(lookup LookupEnv) (Config, error) {
 			KnownHostsPath: read(EnvGitKnownHostsPath, "/run/secrets/git/known_hosts"),
 		},
 		oidc: OIDC{
-			Enabled:          readBool(EnvOIDCEnabled, true),
 			ConfigurationURL: read(EnvOIDCConfigurationURL, ""),
 			ClientID:         read(EnvOIDCClientID, ""),
 			ClientSecret:     read(EnvOIDCClientSecret, ""),
@@ -326,27 +325,25 @@ func validate(config *Config, errs *[]error) {
 	default:
 		*errs = append(*errs, fmt.Errorf("%s: must be id_token or userinfo", EnvOIDCGroupsSource))
 	}
-	if config.oidc.Enabled {
-		require(EnvOIDCConfigurationURL, config.oidc.ConfigurationURL, errs)
-		require(EnvOIDCClientID, config.oidc.ClientID, errs)
-		require(EnvOIDCClientSecret, config.oidc.ClientSecret, errs)
-		require(EnvOIDCAdminGroup, config.oidc.AdminGroup, errs)
-		require(EnvOIDCUserGroup, config.oidc.UserGroup, errs)
-		require(EnvOIDCViewerGroup, config.oidc.ViewerGroup, errs)
-		if config.oidc.ConfigurationURL != "" {
-			if err := validateIssuerURL(config.oidc.ConfigurationURL); err != nil {
-				*errs = append(*errs, fmt.Errorf("%s: %w", EnvOIDCConfigurationURL, err))
-			}
+	require(EnvOIDCConfigurationURL, config.oidc.ConfigurationURL, errs)
+	require(EnvOIDCClientID, config.oidc.ClientID, errs)
+	require(EnvOIDCClientSecret, config.oidc.ClientSecret, errs)
+	require(EnvOIDCAdminGroup, config.oidc.AdminGroup, errs)
+	require(EnvOIDCUserGroup, config.oidc.UserGroup, errs)
+	require(EnvOIDCViewerGroup, config.oidc.ViewerGroup, errs)
+	if config.oidc.ConfigurationURL != "" {
+		if err := validateIssuerURL(config.oidc.ConfigurationURL); err != nil {
+			*errs = append(*errs, fmt.Errorf("%s: %w", EnvOIDCConfigurationURL, err))
 		}
-		groups := []string{config.oidc.AdminGroup, config.oidc.UserGroup, config.oidc.ViewerGroup}
-		if allNonEmpty(groups) && uniqueCount(groups) != len(groups) {
-			*errs = append(*errs, errors.New("OIDC role groups must be distinct"))
-		}
-		if config.oidc.ProviderName == "" && config.oidc.ConfigurationURL != "" {
-			parsed, err := url.Parse(config.oidc.ConfigurationURL)
-			if err == nil {
-				config.oidc.ProviderName = parsed.Hostname()
-			}
+	}
+	groups := []string{config.oidc.AdminGroup, config.oidc.UserGroup, config.oidc.ViewerGroup}
+	if allNonEmpty(groups) && uniqueCount(groups) != len(groups) {
+		*errs = append(*errs, errors.New("OIDC role groups must be distinct"))
+	}
+	if config.oidc.ProviderName == "" && config.oidc.ConfigurationURL != "" {
+		parsed, err := url.Parse(config.oidc.ConfigurationURL)
+		if err == nil {
+			config.oidc.ProviderName = parsed.Hostname()
 		}
 	}
 	if config.oidc.APIBearerEnabled && config.oidc.APIAudience == "" {
@@ -534,7 +531,6 @@ func (c Config) Diagnostics() map[string]string {
 		EnvGitSSHKeyPath:           c.backup.SSHKeyPath,
 		EnvGitKnownHostsPath:       c.backup.KnownHostsPath,
 		EnvLogLevel:                c.logLevel,
-		EnvOIDCEnabled:             strconv.FormatBool(c.oidc.Enabled),
 		EnvOIDCConfigurationURL:    c.oidc.ConfigurationURL,
 		EnvOIDCClientID:            c.oidc.ClientID,
 		EnvOIDCClientSecret:        configuredOrEmptySecret(c.oidc.ClientSecret),

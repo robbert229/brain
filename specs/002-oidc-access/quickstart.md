@@ -24,7 +24,7 @@ Expected: all packages `ok`. Coverage of the spec's acceptance scenarios:
 | US3-AC3 no session while verification is unavailable | `TestProviderOutageCreatesNoSession`, `TestLoginReportsAuthenticationUnavailable` |
 | FR-013 readiness independent of the provider (daemon) | `TestProviderOutageLeavesReadinessAlone` |
 | Status snapshot (`oidc.discovery`, `oidc.active_sessions`) | `TestAuthSurfaceWatchPublishesDiscoveryState`, `TestStatusReportsActiveSessionsAfterSignIn` |
-| Public surface unchanged when OIDC is off | `TestAuthRoutesAreAbsentWhenOIDCDisabled` |
+| Sign-in routes absent only on the unwired bootstrap handler | `TestUnwiredHandlerOmitsSignInRoutes` |
 | SC-005 zero token/claim disclosure | `TestPrivacyAcrossSignInFailures`, `TestPrivacySessionCookiesAreOpaque`, `TestPrivacyLoginPromptLeaksNothing` |
 
 ## Manual verification with the live Pocket ID provider
@@ -33,8 +33,7 @@ Preconditions: `OIDC_*` configured per the spike; `BRAIND_EXTERNAL_URL=https://b
 
 ```sh
 go build -o /tmp/opencode/braind ./cmd/braind
-OIDC_ENABLED=true \
-  OIDC_CONFIGURATION_URL=https://oidc.lab.johnrowley.co/.well-known/openid-configuration \
+OIDC_CONFIGURATION_URL=https://oidc.lab.johnrowley.co/.well-known/openid-configuration \
   OIDC_CLIENT_ID=braind OIDC_CLIENT_SECRET=<secret> \
   OIDC_ADMIN_GROUP=access-brain-admin OIDC_USER_GROUP=access-brain-user \
   OIDC_VIEWER_GROUP=access-brain-viewer \

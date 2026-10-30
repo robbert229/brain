@@ -110,10 +110,10 @@ spec:
             # daemon; anything else makes sign-in land on an unknown host.
             - name: BRAIND_EXTERNAL_URL
               value: https://brain.lab.johnrowley.co
-            - name: OIDC_ENABLED
-              value: "false"
-            # Sign-in (spec 002). Set OIDC_ENABLED to "true" and uncomment once
-            # one provider is configured. Create the secret out of band, e.g.
+            # Sign-in (spec 002) is mandatory. Uncomment the OIDC block below
+            # and fill it in BEFORE applying this bundle: the daemon validates
+            # these at startup and refuses to start without a usable provider.
+            # Create the secret out of band, e.g.
             #   kubectl -n brain create secret generic braind-oidc \
             #     --from-literal=client-secret='<secret>'
             # so the credential never lives in this file.

@@ -71,8 +71,8 @@ func TestStatusServesPublicSnapshot(t *testing.T) {
 	if public.Lifecycle.State != lifecycle.Running || !public.Lifecycle.Ready {
 		t.Fatalf("unexpected lifecycle section: %+v", public.Lifecycle)
 	}
-	if public.OIDC.Enabled || public.Sync.State != status.SyncDisabled || public.Backup.State != status.BackupDisabled {
-		t.Fatalf("disabled subsystems must report their disabled/initial states: %+v", public)
+	if public.OIDC.Discovery != status.OIDCPending || public.Sync.State != status.SyncDisabled || public.Backup.State != status.BackupDisabled {
+		t.Fatalf("subsystems must report their disabled/initial states: %+v", public)
 	}
 }
 

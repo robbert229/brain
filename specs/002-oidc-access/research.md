@@ -1,12 +1,12 @@
 # Phase 0 Research: OIDC Sign-In and Role Access
 
-## D1 — Implement OIDC with the standard library, not `go-oidc`
+## D1 — Implement OIDC with `go-oidc` and `oauth2`
 
-**Decision**: Implement discovery, S256 PKCE, RS256 ID-token validation, and token exchange directly on the standard library, modeled on the live-verified pattern in `tools/oidcverify/main.go`.
+**Decision**: Implement discovery, S256 PKCE, RS256 ID-token validation, and token exchange with `github.com/coreos/go-oidc/v3` and `golang.org/x/oauth2`, keeping the provider facade, health bookkeeping, endpoint-origin hardening, nonce comparison, and error vocabulary in `internal/braind/auth/oidc.go`.
 
-**Rationale**: The spike tool already proves the full flow against Pocket ID with zero dependencies, and the flow we need is narrow (one provider, one client, code flow only). `coreos/go-oidc` would add a dependency tree and its own abstractions for generality we do not use (Principle III; the repository has no third-party dependencies to date). Validation rules mirror `oidcverify`: exact-issuer equality, endpoint-origin validation against the issuer, `aud` contains client ID, `exp`/`iat` window, `nonce` equality, and signature verification against the keyed JWKS kid.
+**Rationale**: Supersedes the original stdlib-only decision, which relied on the `tools/oidcverify` spike proving the narrow flow with zero dependencies. The hand-rolled code owned exactly the security-critical edge cases (algorithm handling, kid selection, audience parsing, timing rules) where subtle bugs become vulnerabilities; the libraries are the de facto standard for this surface and their transitive tree is small (`go-jose`). See [ADR-0010](../../docs/adr/0010-adopt-standard-oidc-libraries.md). Validation rules still enforced: exact-issuer equality, endpoint-origin validation against the issuer, `aud` contains client ID, `exp`/`iat` window, `nonce` equality, and signature verification against the keyed JWKS kid — now by the libraries plus the nonce and subject checks in `VerifyIDToken`.
 
-**Consequence**: We own JWT/JWKS edge cases. Mitigate with a dedicated test matrix (wrong signature, unknown kid, expired token, issuer mismatch, audience mismatch, missing `exp`, non-string `groups`).
+**Consequence**: A third-party dependency exists, so releases pin `go-oidc` and `oauth2` and the Go directive tracks their minimum. We no longer own JWT/JWKS edge cases; the dedicated test matrix (wrong signature, unknown kid, expired token, issuer mismatch, audience mismatch, missing `exp`, non-string `groups`) is kept to prove the facade preserves those guarantees.
 
 ## D2 — Sessions: in-memory, opaque, three independent timers
 
@@ -52,6 +52,6 @@
 
 ## D8 — Route surface: mount auth handlers under explicit paths, keep probes public
 
-**Decision**: New daemon routes: `GET /login` (sign-in prompt), `GET /oauth2/callback` (redirect target), `POST /logout`. Protected routes (all vault/API routes from later specs) sit behind the `auth.RequireAuth` middleware; probes (`/healthz`, `/readyz`), static assets, `/status`, and the landing page stay public.
+**Decision**: New daemon routes: `GET /login` (sign-in prompt), `GET /oauth2/callback` (redirect target), `POST /logout`. Protected routes (all vault/API routes from later specs, plus the landing page per the operator's later direction) sit behind the `auth.RequireAuth` middleware; probes (`/healthz`, `/readyz`), static assets, and `/status` stay public.
 
-**Rationale**: Probes must stay anonymous for Kubernetes (ADR-0003) and `/status` must remain operator-visible (001 contract). Keeping the landing page public preserves the 009 contract; authentication enforcement applies to the vault surface where 003 begins.
+**Rationale**: Probes must stay anonymous for Kubernetes (ADR-0003) and `/status` must remain operator-visible (001 contract). The landing page originally stayed public to preserve the 009 contract; the operator later directed that the index page be session-gated, so it shares the same `RequireAuth` decision (see 009 spec assumptions).

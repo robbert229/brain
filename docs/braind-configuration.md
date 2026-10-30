@@ -28,15 +28,14 @@ is validated at startup; secret values are redacted from diagnostics.
 | `BRAIND_GIT_SSH_KEY_PATH` | `/run/secrets/git/ssh-privatekey` | SSH private key file used for backup. |
 | `BRAIND_GIT_KNOWN_HOSTS_PATH` | `/run/secrets/git/known_hosts` | Pinned SSH host keys for backup. |
 | `BRAIND_LOG_LEVEL` | `info` | Structured log verbosity. |
-| `OIDC_ENABLED` | `true` | Enable OIDC configuration validation. |
-| `OIDC_CONFIGURATION_URL` | empty | Provider configuration URL. HTTPS, except an HTTP loopback provider in development. |
-| `OIDC_CLIENT_ID` | empty | Registered OIDC client identifier. |
-| `OIDC_CLIENT_SECRET` | empty | Confidential-client secret. |
+| `OIDC_CONFIGURATION_URL` | empty | Provider configuration URL. HTTPS, except an HTTP loopback provider in development. Required: OIDC is always enabled. |
+| `OIDC_CLIENT_ID` | empty | Registered OIDC client identifier. Required. |
+| `OIDC_CLIENT_SECRET` | empty | Confidential-client secret. Required. |
 | `OIDC_GROUPS_CLAIM` | `groups` | Claim containing group names. |
 | `OIDC_GROUPS_SOURCE` | `id_token` | Group source: `id_token` or `userinfo`. |
-| `OIDC_ADMIN_GROUP` | empty | Exact administrator group name. |
-| `OIDC_USER_GROUP` | empty | Exact user group name. |
-| `OIDC_VIEWER_GROUP` | empty | Exact viewer group name. |
+| `OIDC_ADMIN_GROUP` | empty | Exact administrator group name. Required. |
+| `OIDC_USER_GROUP` | empty | Exact user group name. Required. |
+| `OIDC_VIEWER_GROUP` | empty | Exact viewer group name. Required. |
 | `OIDC_USER_CLAIM` | `email` | Claim used as the displayed username. |
 | `OIDC_PROVIDER_NAME` | derived from issuer host | Provider label shown to users. |
 | `OIDC_AUTO_REDIRECT` | `false` | Automatically redirect unauthenticated page visits to sign-in. |
@@ -48,17 +47,19 @@ is validated at startup; secret values are redacted from diagnostics.
 | `OIDC_REAUTH_INTERVAL` | `1h` | Maximum interval between role re-evaluations. |
 | `BRAIND_TRUSTED_PROXY_CIDRS` | empty | Trusted proxy ranges for forwarded request metadata. |
 
-The smoke command in the [README](../README.md) disables OIDC and Git backup:
-sign-in needs a real provider, so it cannot complete without one, and Git backup
-is not yet implemented. Their settings and defaults are already part of the
-validated configuration surface.
+The smoke command in the [README](../README.md) disables Git backup (not yet
+implemented) and points the required OIDC settings at a placeholder issuer: the
+daemon always demands one provider, and while that issuer is unreachable the
+probes and status still work; the landing page redirects to sign-in, which
+stays degraded until a reachable issuer is configured.
 
 ## Sign-in, sessions, and CSRF
 
-`OIDC_ENABLED` is true by default, so configuration validation already requires
-one provider's URL, client identifier, and secret before the daemon starts.
-What the running daemon does with them is what an operator needs to know,
-because it sets the failure modes you will see.
+OIDC is always enabled. Configuration validation requires one provider's URL,
+client identifier, secret, and the three role groups before the daemon starts,
+and `braind` refuses to start without a usable sign-in surface. What the
+running daemon does with them is what an operator needs to know, because it
+sets the failure modes you will see.
 
 **One provider.** Exactly one provider is supported. The daemon discovers its
 endpoints and signing keys from `OIDC_CONFIGURATION_URL`; there is no fallback

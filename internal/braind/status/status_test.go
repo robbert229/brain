@@ -109,7 +109,7 @@ func TestPublicSnapshotIncludesOperationalFields(t *testing.T) {
 		Lifecycle: lifecycle.Snapshot{State: lifecycle.Degraded, Ready: true, ChangedAt: completedAt},
 		Vault:     Vault{State: VaultReadOnly, ReadOnly: true},
 		OIDC: OIDC{
-			Enabled: true, Discovery: OIDCReady, Issuer: "https://issuer.example.test", ClientID: "brain",
+			Discovery: OIDCReady, Issuer: "https://issuer.example.test", ClientID: "brain",
 			ProviderName: "Test ID", GroupsClaim: "roles", GroupsSource: "userinfo",
 			AdminGroup: "admins", UserGroup: "users", ViewerGroup: "viewers", ActiveSessions: 4,
 		},
@@ -197,13 +197,12 @@ func TestStoreSupportsConcurrentReadersAndWriters(t *testing.T) {
 
 func TestInitialStatusReflectsDisabledSubsystems(t *testing.T) {
 	processConfig := loadConfig(t, map[string]string{
-		config.EnvOIDCEnabled:      "false",
 		config.EnvGitBackupEnabled: "false",
 		config.EnvSyncEnabled:      "false",
 	})
 	snapshot := Initial("dev", "", processConfig, lifecycle.New().Snapshot(), time.Now())
-	if snapshot.OIDC.Discovery != OIDCDisabled || snapshot.Sync.State != SyncDisabled || snapshot.Backup.State != BackupDisabled {
-		t.Fatalf("unexpected disabled placeholder states: %+v", snapshot)
+	if snapshot.OIDC.Discovery != OIDCPending || snapshot.Sync.State != SyncDisabled || snapshot.Backup.State != BackupDisabled {
+		t.Fatalf("unexpected placeholder states: %+v", snapshot)
 	}
 }
 

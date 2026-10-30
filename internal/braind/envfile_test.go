@@ -86,7 +86,12 @@ func envFileConfig(dataRoot string) string {
 			"BRAIND_VAULT_PATH=%s/vault\n"+
 			"BRAIND_GIT_DIR=%s/git/vault.git\n"+
 			"BRAIND_GIT_BACKUP_ENABLED=false\n"+
-			"OIDC_ENABLED=false\n",
+			"OIDC_CONFIGURATION_URL=https://oidc.example.test/.well-known/openid-configuration\n"+
+			"OIDC_CLIENT_ID=braind\n"+
+			"OIDC_CLIENT_SECRET=env-file-client-secret\n"+
+			"OIDC_ADMIN_GROUP=access-brain-admin\n"+
+			"OIDC_USER_GROUP=access-brain-user\n"+
+			"OIDC_VIEWER_GROUP=access-brain-viewer\n",
 		dataRoot, dataRoot, dataRoot,
 	)
 }

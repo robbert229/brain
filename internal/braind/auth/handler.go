@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -368,18 +369,25 @@ func sanitizedError(value string) string {
 	return value
 }
 
+// tokenPattern matches JWT-shaped values (base64url segments starting with
+// the '{"' JSON prefix) and long opaque runs that could be secrets, so
+// library-supplied error text can never smuggle token material into a log
+// line (FR-009).
+var tokenPattern = regexp.MustCompile(`eyJ[A-Za-z0-9_-]{5,}(?:\.[A-Za-z0-9_-]*){2}|[A-Za-z0-9_-]{40,}`)
+
 // redactedError strips anything that looks like a token or credential from error
-// text before it reaches logs.
+// text before it reaches logs. Errors the auth package builds itself carry only
+// coarse, safe detail, so the whole message survives; the scrubbing guards
+// against provider text echoing secrets. Truncation keeps log lines bounded —
+// it must not become the reason a diagnostic disappears, so no positional
+// cutting is applied.
 func redactedError(err error) string {
 	if err == nil {
 		return ""
 	}
-	message := err.Error()
-	if index := strings.LastIndex(message, ": "); index >= 0 {
-		message = message[:index]
-	}
-	if len(message) > 120 {
-		message = message[:120]
+	message := tokenPattern.ReplaceAllString(err.Error(), "[redacted]")
+	if len(message) > 200 {
+		message = message[:200]
 	}
 	return message
 }

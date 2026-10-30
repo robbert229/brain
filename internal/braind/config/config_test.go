@@ -39,7 +39,7 @@ func TestLoadDefaultsWithRequiredValues(t *testing.T) {
 	if got := config.Backup(); !got.Enabled || got.GitDir != "/data/git/vault.git" || got.Branch != "main" || got.Interval != 6*time.Hour || got.QuietPeriod != 30*time.Second {
 		t.Fatalf("unexpected backup defaults: %+v", got)
 	}
-	if got := config.OIDC(); !got.Enabled || got.GroupsClaim != "groups" || got.GroupsSource != "id_token" || got.UserClaim != "email" || got.ProviderName != "oidc.lab.johnrowley.co" {
+	if got := config.OIDC(); got.GroupsClaim != "groups" || got.GroupsSource != "id_token" || got.UserClaim != "email" || got.ProviderName != "oidc.lab.johnrowley.co" {
 		t.Fatalf("unexpected OIDC defaults: %+v", got)
 	}
 	if got := config.Session(); got.IdleTimeout != time.Hour || got.AbsoluteLifetime != 8*time.Hour || got.ReauthInterval != time.Hour {
@@ -75,13 +75,6 @@ func TestLoadOverridesAndReturnsDefensiveCopies(t *testing.T) {
 		EnvGitSSHKeyPath:           "/secrets/key",
 		EnvGitKnownHostsPath:       "/secrets/hosts",
 		EnvLogLevel:                "debug",
-		EnvOIDCEnabled:             "false",
-		EnvOIDCConfigurationURL:    "",
-		EnvOIDCClientID:            "",
-		EnvOIDCClientSecret:        "",
-		EnvOIDCAdminGroup:          "",
-		EnvOIDCUserGroup:           "",
-		EnvOIDCViewerGroup:         "",
 		EnvOIDCGroupsClaim:         "roles",
 		EnvOIDCGroupsSource:        "userinfo",
 		EnvOIDCUserClaim:           "preferred_username",
@@ -247,13 +240,14 @@ func TestLoadRejectsIncompatibleSettings(t *testing.T) {
 	}
 }
 
-func TestLoadAllowsDisabledSubsystemsWithoutCredentials(t *testing.T) {
-	environment := map[string]string{
-		EnvOIDCEnabled:      "false",
-		EnvGitBackupEnabled: "false",
-	}
+// TestLoadAllowsDisabledBackupWithoutCredentials proves the backup subsystem can
+// still be turned off (it is not implemented yet). OIDC has no such switch: its
+// required settings are validated on every load.
+func TestLoadAllowsDisabledBackupWithoutCredentials(t *testing.T) {
+	environment := validEnvironment()
+	environment[EnvGitBackupEnabled] = "false"
 	if _, err := Load(mapLookup(environment)); err != nil {
-		t.Fatalf("load disabled subsystems: %v", err)
+		t.Fatalf("load with backup disabled: %v", err)
 	}
 }
 
