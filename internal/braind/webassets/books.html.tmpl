@@ -25,6 +25,7 @@
       <p class="byline">{{.Byline}}</p>
       {{if or .Interest .Status}}<p class="chips">{{.Interest}}{{if and .Interest .Status}} · {{end}}{{.Status}}</p>{{end}}
       <div class="review">{{.Review}}</div>
+      {{if .EditURL}}<p><a href="{{.EditURL}}">Edit review</a></p>{{end}}
     </article>
     {{end}}
     <footer>
