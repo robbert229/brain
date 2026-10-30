@@ -158,6 +158,72 @@ func TestCreateReviewEnforcesNoteSizeBound(t *testing.T) {
 	}
 }
 
+func TestReadAndUpdateReviewPreserveMetadataInPlace(t *testing.T) {
+	booksDir := t.TempDir()
+	path := filepath.Join(booksDir, "Series", "Book.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir nested folder: %v", err)
+	}
+	original := "---\ntags:\n  - Hobby/Books\ntype: Zettel\nstatus (Media): Finished\ninterest: 🔥🔥\ncustom: keep this\nauthor: Old Author\ncover: old.jpg\nrating: 4/5\nfinished: 2025-01-02\n---\n\n# Old Title\nOld review.\n\n![[old.jpg]]\n"
+	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
+		t.Fatalf("write note: %v", err)
+	}
+
+	draft, err := ReadReview(booksDir, "Series/Book.md", 2<<20)
+	if err != nil {
+		t.Fatalf("ReadReview: %v", err)
+	}
+	if draft.Title != "Old Title" || draft.Author != "Old Author" || draft.Rating != "4/5" || draft.Cover != "old.jpg" || draft.Finished != "2025-01-02" || draft.Review != "Old review." {
+		t.Fatalf("ReadReview draft = %+v", draft)
+	}
+
+	updated := ReviewDraft{Title: "New Title", Author: "New Author", Rating: "4.5/5", Cover: "new.jpg", Finished: "2025-02-03", Review: "Updated review."}
+	if err := UpdateReview(booksDir, "Series/Book.md", updated, 2<<20, testNow); err != nil {
+		t.Fatalf("UpdateReview: %v", err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read updated note: %v", err)
+	}
+	for _, want := range []string{"tags:", "Hobby/Books", "type: Zettel", "status (Media): Finished", "interest:", "custom: keep this", "author: New Author", "cover: new.jpg", "rating: 4.5/5", "finished:", "# New Title", "Updated review.", "![[new.jpg]]"} {
+		if !strings.Contains(string(content), want) {
+			t.Errorf("updated note lacks %q:\n%s", want, content)
+		}
+	}
+	if strings.Contains(string(content), "Old Title") || strings.Contains(string(content), "Old review") || strings.Contains(string(content), "![[old.jpg]]") {
+		t.Errorf("old editable content remains:\n%s", content)
+	}
+	if _, err := os.Stat(filepath.Join(booksDir, "new-title.md")); !os.IsNotExist(err) {
+		t.Errorf("edit created a duplicate note: stat error = %v", err)
+	}
+	book, ok := ParseNote(filepath.Base(path), content)
+	if !ok || book.Title != updated.Title || book.Author != updated.Author || book.Cover != updated.Cover || book.Interest != "🔥🔥" || book.Finished.Format("2006-01-02") != updated.Finished {
+		t.Fatalf("updated note does not parse as edited book: %+v, ok=%v", book, ok)
+	}
+}
+
+func TestUpdateReviewRefusesUnsafePaths(t *testing.T) {
+	booksDir := t.TempDir()
+	outside := t.TempDir()
+	outsideNote := filepath.Join(outside, "Book.md")
+	if err := os.WriteFile(outsideNote, []byte("precious"), 0o644); err != nil {
+		t.Fatalf("write outside note: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(booksDir, "linked")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	valid := ReviewDraft{Title: "New title", Review: "New review"}
+	for _, unsafe := range []string{"../Book.md", outsideNote, "linked/Book.md"} {
+		if err := UpdateReview(booksDir, unsafe, valid, 2<<20, testNow); err == nil {
+			t.Errorf("UpdateReview(%q) unexpectedly succeeded", unsafe)
+		}
+	}
+	content, err := os.ReadFile(outsideNote)
+	if err != nil || string(content) != "precious" {
+		t.Errorf("unsafe edit modified outside note: %q, %v", content, err)
+	}
+}
+
 func TestSlugify(t *testing.T) {
 	for input, want := range map[string]string{
 		"A Thousand Li 01 - The First Step":                    "a-thousand-li-01-the-first-step",

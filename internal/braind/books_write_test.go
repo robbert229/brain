@@ -71,6 +71,71 @@ func postReview(t *testing.T, f *booksWriteFixture, cookie *http.Cookie, form ur
 	return recorder
 }
 
+func postBookEdit(t *testing.T, f *booksWriteFixture, cookie *http.Cookie, form url.Values, csrf string) *httptest.ResponseRecorder {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/books/edit", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if csrf != "" {
+		request.Header.Set(auth.CSRFHeader, csrf)
+	}
+	request.AddCookie(cookie)
+	f.handler.ServeHTTP(recorder, request)
+	return recorder
+}
+
+func TestBookEditFlowUpdatesNestedNoteAndRequiresRights(t *testing.T) {
+	fixture := newBooksWriteFixture(t, false)
+	const notePath = "Series/Book.md"
+	fixture.booksFixture.writeNote(t, notePath, "---\ntags:\n  - Hobby/Books\ntype: Zettel\nstatus (Media): Finished\ninterest: 🔥🔥\ncustom: keep\nauthor: Old Author\nrating: 4/5\n---\n\n# Old Title\nOld review.\n")
+	user := fixture.signIn(t, "access-brain-user")
+	viewer := fixture.signIn(t, "access-brain-viewer")
+
+	request := httptest.NewRequest(http.MethodGet, "/books/edit?file=Series%2FBook.md", nil)
+	request.AddCookie(user)
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("user GET edit form = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	for _, want := range []string{`action="/books/edit"`, `name="file" value="Series/Book.md"`, `value="Old Title"`, `value="Old Author"`, `>Old review.</textarea>`} {
+		if !strings.Contains(recorder.Body.String(), want) {
+			t.Errorf("edit form lacks %q: %s", want, recorder.Body.String())
+		}
+	}
+
+	form := url.Values{"file": {notePath}, "title": {"Updated Title"}, "author": {"New Author"}, "rating": {"4.5/5"}, "review": {"Updated review."}}
+	if recorder := postBookEdit(t, fixture, user, form, ""); recorder.Code != http.StatusForbidden {
+		t.Fatalf("edit POST without CSRF = %d, want 403", recorder.Code)
+	}
+	if recorder := postBookEdit(t, fixture, viewer, form, fixture.csrfFor(t, viewer)); recorder.Code != http.StatusForbidden {
+		t.Fatalf("viewer edit POST = %d, want 403", recorder.Code)
+	}
+	if recorder := postBookEdit(t, fixture, user, form, fixture.csrfFor(t, user)); recorder.Code != http.StatusSeeOther {
+		t.Fatalf("user edit POST = %d body=%s, want 303", recorder.Code, recorder.Body.String())
+	}
+	content, err := os.ReadFile(filepath.Join(fixture.booksDir, notePath))
+	if err != nil {
+		t.Fatalf("read edited note in original nested path: %v", err)
+	}
+	for _, want := range []string{"tags:", "Hobby/Books", "status (Media): Finished", `interest: "\U0001F525\U0001F525"`, "custom: keep", "author: New Author", "rating: 4.5/5", "# Updated Title", "Updated review."} {
+		if !strings.Contains(string(content), want) {
+			t.Errorf("edited note lacks %q:\n%s", want, content)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(fixture.booksDir, "updated-title.md")); !os.IsNotExist(err) {
+		t.Errorf("edit created duplicate note: %v", err)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/books", nil)
+	request.AddCookie(user)
+	recorder = httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, request)
+	if !strings.Contains(recorder.Body.String(), "Updated Title") {
+		t.Error("edited title is not visible on the shelf")
+	}
+}
+
 func TestReviewFormGatedByRole(t *testing.T) {
 	fixture := newBooksWriteFixture(t, false)
 	viewer := fixture.signIn(t, "access-brain-viewer")
