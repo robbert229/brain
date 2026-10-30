@@ -15,7 +15,7 @@ description: "Task list for Book Reviews (spec 010)"
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
-- **[Story]**: US1 = browse shelf, US2 = write review, US3 = glance polish
+- **[Story]**: US1 = browse shelf, US2 = write review, US3 = glance polish, US4 = edit existing review
 - Paths are repository-relative.
 
 ---
@@ -108,7 +108,27 @@ description: "Task list for Book Reviews (spec 010)"
 
 ---
 
-## Phase 6: Polish & Cross-Cutting Concerns
+## Phase 6: User Story 4 — Edit an existing book review (Priority: P2)
+
+**Goal**: A contributor or administrator updates an existing shelf note in place, without losing unrelated frontmatter or moving the note.
+
+**Independent Test**: Edit a nested fixture note; the same file and folder remain, updated values appear on the shelf, unrelated metadata is retained, unsafe paths are refused, and viewer/read-only requests cannot change files.
+
+### Tests for User Story 4
+
+- [X] T026 [US4] Add domain tests in `internal/braind/books/writer_test.go` for edit prefill, in-place updates, unrelated frontmatter preservation, and refusal of traversal, absolute, and symlinked paths.
+- [X] T027 [US4] Add handler tests in `internal/braind/books_write_test.go` for edit form prefill, viewer and CSRF refusal, successful nested-note update, and shelf refresh.
+
+### Implementation for User Story 4
+
+- [X] T028 [US4] Carry each scanned note's relative path through `internal/braind/books/book.go` and `internal/braind/books/catalog.go`; implement bounded safe read and atomic in-place update in `internal/braind/books/writer.go`, preserving unrelated frontmatter.
+- [X] T029 [US4] Add role-gated GET/POST `/books/edit` handlers in `internal/braind/books_handlers.go` and a prefilled edit form/action in `internal/braind/webassets/review_form.html.tmpl` and `internal/braind/webassets/books.html.tmpl`; hide edit actions in read-only mode.
+
+**Checkpoint**: Existing nested notes can be edited in place with authorization, CSRF, validation, and path confinement.
+
+---
+
+## Phase 7: Polish & Cross-Cutting Concerns
 
 - [X] T021 [P] Add `BRAIND_BOOKS_FOLDER` and `BRAIND_COVERS_FOLDER` env entries (with the defaults above) to `deploy/install.yaml` next to the existing `BRAIND_DATA_PATH` block
 - [X] T022 [P] Full gate: `gofmt -l internal/braind` empty, `go vet ./...`, `go test ./...` green — record results
@@ -125,12 +145,14 @@ description: "Task list for Book Reviews (spec 010)"
 - **Phase 3 (US1)**: needs Phase 2. T009/T010 first (fail), then T011/T012/T013
 - **Phase 4 (US2)**: needs Phase 2 only for the writer path; the 303→shelf test reuses US1's shelf. T014/T015 first, then T016–T018
 - **Phase 5 (US3)**: needs US1 (T009's fixture harness); T019 first, then T020
-- **Phase 6**: all desired stories complete
+- **Phase 6 (US4)**: needs the catalog path from Phase 2; implement safe domain read/update before the edit routes
+- **Phase 7 (Polish)**: all desired stories complete
 
 ### Cross-story notes
 
 - US2's writer is independent of US1's reader (opposite directions on the vault) — it could ship without the shelf rendering, but its acceptance includes the shelf, so deliver after US1.
 - US3 is a pure presentation delta on US1's cards.
+- US4 uses catalog-relative paths and can begin after the domain/catalog phase; edit tests precede the handlers.
 
 ### Parallel Opportunities
 
@@ -159,7 +181,7 @@ description: "Task list for Book Reviews (spec 010)"
 ### Incremental Delivery
 
 1. Setup + Foundational → domain tested.
-2. US1 → shelf live (MVP). 3. US2 → capture live. 4. US3 → polish. 5. Phase 6 → ship PR.
+2. US1 → shelf live (MVP). 3. US2 → capture live. 4. US3 → polish. 5. US4 → edit existing notes. 6. Phase 7 → ship PR.
 
 ---
 
@@ -167,7 +189,7 @@ description: "Task list for Book Reviews (spec 010)"
 
 - [P] = different files, no dependency. Commit after each checkpoint (Conventional Commits).
 - Tests precede implementation per story (constitution Principle I); verify they fail first.
-- File-conflict watch: `books_handlers.go` (T012 then T018) and `run.go` (T008 then T012/T018) are sequential by design.
+- File-conflict watch: `books_handlers.go` (T012, T018, T029) and `run.go` (T008, T012, T018) are sequential by design.
 
 
 ## Fallback Cover Completion (FR-005)

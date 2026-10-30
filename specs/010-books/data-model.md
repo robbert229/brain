@@ -25,6 +25,7 @@ One book note on disk, projected into shelf display values. Produced only by
 | `Rating` | float64 | frontmatter `rating` (`n/5`, halves; also bare number) | 0 → rating hidden; raw text kept in `RatingText` when unparseable |
 | `RatingText` | string | raw `rating` value for display | empty |
 | `Filename` | string | note filename (diagnostics, skip notices) | always present |
+| `Path` | string | slash-separated path relative to the configured Books folder | present for scanned shelf entries; edit target |
 
 Validation rules (all enforced in `ParseNote`, table-tested):
 
@@ -60,7 +61,7 @@ image at the same dimensions (SC-003: zero broken images, no-JS).
 
 ### ReviewDraft (write side)
 
-Form submission, validated by `ValidateDraft` before any filesystem touch.
+Create or edit form submission, validated by `ValidateDraft` before filesystem writes.
 
 | Input | Required | Rule (FR-007, FR-010) |
 | --- | --- | --- |
@@ -105,19 +106,33 @@ folder root, append `-2`, `-3`, … . Persisted atomically via `O_CREATE|O_EXCL`
 file in the same folder → write+fsync → rename → folder fsync (research R5). `O_EXCL`
 makes "never overwrites" a kernel guarantee, not a check.
 
+### Editing an existing note
+
+The selected note is addressed by a relative path beneath the configured Books
+folder. Traversal, absolute paths, symlink escapes, non-files, and notes that no
+longer parse as books are refused. A valid edit updates title, author, rating, cover,
+finished date, and review in place; unrelated YAML fields, status, interest, and the
+existing folder path are preserved. The update is written through a synced temporary
+file and atomically replaces the selected file; it never creates a new slug or moves
+the note. The resulting bytes remain bounded by `MaxNoteBytes`.
+
 ## State transitions
 
-Review submission lifecycle (single writer, spec 001 lock held):
+Review creation lifecycle (single writer, spec 001 lock held):
 
 `draft (form)` → `valid (ValidateDraft ok)` → `persisted (rename complete)` →
 `visible (next shelf scan)` — every step forward is required; any validation or IO
 failure stops at the current step with a user-visible form error and **no** partial
 file (the temp file is removed on failure).
 
+Existing-note edit lifecycle: `existing book note` → `safe in-root path and book
+validation` → `validated replacement` → `atomic replacement` → `visible on next shelf
+scan`. Validation or I/O failure leaves the original note intact.
+
 ## Roles (from spec 002, no new identities)
 
 - Any verified session → may read the shelf and covers.
-- `RoleUser`/`RoleAdministrator` → may open the form and submit (with CSRF).
-- `RoleViewer` → read-only: no form control, submissions refused (`403`).
-- `BRAIND_READ_ONLY=true` → same as viewer for the create flow, enforced server-side
-  regardless of role, plus the shelf hides the form link.
+- `RoleUser`/`RoleAdministrator` → may open create/edit forms and submit (with CSRF).
+- `RoleViewer` → read-only: no create/edit controls, submissions refused (`403`).
+- `BRAIND_READ_ONLY=true` → same as viewer for create/edit flows, enforced server-side
+  regardless of role, plus the shelf hides the form links.

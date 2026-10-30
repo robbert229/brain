@@ -15,7 +15,7 @@ a plain HTML form that durably creates a new Obsidian-convention book note in th
 folder. Implemented as a new `internal/braind/books` package (parser, catalog, writer)
 wired into the existing `newHandler` mux behind the spec 002 auth surface, with page
 templates in the existing embedded `webassets` and covers served from the configured
-attachments folder. Supported covers are checked for readable image data; unavailable covers use a bundled accessible fallback image with the same dimensions.
+attachments folder. Supported covers are checked for readable image data; unavailable covers use a bundled accessible fallback image with the same dimensions. Contributor and administrator sessions can also edit existing book notes in place through a prefilled form; edits preserve unrelated frontmatter and use the same validation and size limits as note creation.
 
 ## Technical Context
 
@@ -33,9 +33,9 @@ attachments folder. Supported covers are checked for readable image data; unavai
 
 **Performance Goals**: Shelf of the current corpus (130 books) renders in <250 ms server-side; full scan of up to 500 notes completes <500 ms; cover fetch is a single file open. No pagination or caching until a demonstrated need (Principle III).
 
-**Constraints**: `BRAIND_READ_ONLY` disables writes; note size bounded by `BRAIND_MAX_NOTE_BYTES`; single-writer data-lock (spec 001) already held by the daemon; no external services; htmx may enhance but the form MUST work as an ordinary POST (Principle IV).
+**Constraints**: `BRAIND_READ_ONLY` disables creation and editing; note size bounded by `BRAIND_MAX_NOTE_BYTES`; edit targets stay under the configured Books folder; single-writer data-lock (spec 001) already held by the daemon; no external services; forms MUST work as ordinary POSTs (Principle IV).
 
-**Scale/Scope**: ~130 book notes today, hundreds of folders; one new package (~4 source files), 2 new templates, 4 new routes, 2 new config keys, 1 landing-page link.
+**Scale/Scope**: ~130 book notes today, hundreds of folders; one new package (~4 source files), 2 new templates, 6 routes, 2 new config keys, 1 landing-page link.
 
 ## Constitution Check
 
@@ -46,9 +46,9 @@ attachments folder. Supported covers are checked for readable image data; unavai
 | Independently testable without other features or live services | I | **PASS** — `books` package exercised by unit tests over fixture directories; handlers tested with `httptest` and the real `auth` surface; CI-runnable, no shared mutable state. |
 | Business logic explicit, named, typed, directly tested | II | **PASS** — book detection, field parsing, sort order, form validation, filename safety are named functions in `books` with table-driven tests; templates only render. |
 | Simplest solution; no unproven abstraction | III | **PASS** — scan-per-request (no cache/index layer), rooted filesystem access for covers to prevent symlink escape, one template per page, no interfaces/repository pattern. Single new dependency (`yaml.v3`) justified as pure mechanics per ADR-0010 precedent. |
-| Go backend; server-rendered HTML + HTMX; core flows work without JS | IV | **PASS** — shelf and form are server-rendered `html/template` output; review submission is a plain `<form method=post>` with CSRF field; htmx not required for any flow. |
-| Markdown is the single source of truth for note content | V | **PASS** — a review is stored as an ordinary Obsidian-convention `.md` file in the Books folder; nothing written to any other store; shelf is derived and recomputable. |
-| Data & Storage: durable writes, derived data never authoritative | — | **PASS** — atomic create (`O_EXCL` temp + fsync + rename + dir fsync); shelf never persisted; covers are read-only projections of the attachments folder. |
+| Go backend; server-rendered HTML + HTMX; core flows work without JS | IV | **PASS** — shelf and forms are server-rendered `html/template` output; create and edit submissions are plain `<form method=post>` requests with CSRF fields; htmx not required for any flow. |
+| Markdown is the single source of truth for note content | V | **PASS** — reviews are stored as ordinary Obsidian-convention `.md` files in the Books folder; nothing written to any other store; shelf is derived and recomputable. |
+| Data & Storage: durable writes, derived data never authoritative | — | **PASS** — atomic create and in-place edit (temp write + fsync + replacement + dir fsync); shelf never persisted; covers are read-only projections of the attachments folder. |
 
 No violations — Complexity Tracking not needed.
 
@@ -84,16 +84,16 @@ internal/braind/
 ├── books/                    # NEW package — all books business logic
 │   ├── book.go               #   Book entity, frontmatter split + YAML parse, field normalization
 │   ├── catalog.go            #   recursive scan, book detection, skip accounting, sort order
-│   ├── writer.go             #   ReviewDraft validation, slug/filename safety, atomic no-overwrite create
+│   ├── writer.go             #   ReviewDraft validation, safe read/update, atomic create and edit
 │   ├── book_test.go
 │   ├── catalog_test.go
 │   └── writer_test.go
-├── books_handlers.go         # route handlers: shelf page, form page, create, cover serving
+├── books_handlers.go         # route handlers: shelf, create/edit forms, create/update, cover serving
 ├── books_test.go             # httptest contract tests against a fixture data dir + auth surface
 ├── webassets/
 │   ├── index.html.tmpl       # EDIT: add "Books" link card
 │   ├── books.html.tmpl       # NEW: shelf page
-│   ├── review_form.html.tmpl # NEW: add-review page
+│   ├── review_form.html.tmpl # NEW: create/edit form page
 │   └── review_notice.html.tmpl # NEW: read-only refusal page
 ├── landing.go                # EDIT: template context gains books link (no behavior change)
 ├── run.go                    # EDIT: mount books routes in newHandler with handlerState wiring

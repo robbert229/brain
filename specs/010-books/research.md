@@ -107,7 +107,7 @@ user during specification.
   true.
 - **Alternatives considered**: write `status (Media):` from a form choice (rejected:
   every sample is `Finished`; hard-coding it matches how the user reviews *after*
-  reading, and future edit features can change it); writing to a user-chosen
+  reading. Existing-note edits preserve the current status); writing to a user-chosen
   subfolder (rejected: keeps filename-safety surface small — reviews always land in
   the Books folder root); appending to existing notes (rejected pre-spec by the user).
 
@@ -143,12 +143,19 @@ user during specification.
 
 - **Decision**: Reuse the spec 002 surface exactly as `landing.go` does. Shelf
   (`GET /books`, `GET /books/covers/…`) requires any verified session (`RequireAuth`,
-  all roles — the shelf is read like the landing page). The form page and `POST /books`
+  all roles — the shelf is read like the landing page). Create and edit pages and their POST routes
   additionally require `Role.Meets(RoleUser)` and a valid CSRF token; when
-  `BRAIND_READ_ONLY` is set, the shelf hides the "Add a review" control and `POST
-  /books` returns `403` with the standard failure page.
+  `BRAIND_READ_ONLY` is set, the shelf hides write controls and write routes return
+  `403` with the standard failure page.
 - **Rationale**: FR-009 maps 1:1 onto existing middleware; viewer denial is the
   existing role check, not a new rule.
 - **Alternatives considered**: administrator-only reviews (rejected: `user` is the
   contributor role throughout the app); returning `405` in read-only mode (rejected:
   the route exists and is understood — `403` communicates "policy, not absence").
+
+
+## R9 — Safe existing-note editing
+
+- **Decision**: Address an existing note using its slash-separated path relative to the configured Books folder. Reject traversal, absolute paths, symlink escapes, non-regular files, and notes that no longer parse as books. Reuse `ReviewDraft` validation and the configured size limit. Update the editable metadata and body while retaining unrelated YAML fields, status, interest, and the original relative path; publish a synced temporary replacement atomically.
+- **Rationale**: FR-015 and FR-017 require editing the selected note without creating a duplicate or permitting writes outside the Books folder. Retaining unrelated frontmatter avoids dropping vault-specific fields when editing.
+- **Alternatives considered**: delete-and-recreate under a new slug (rejected: changes the path and can lose references); overwrite after resolving an unchecked path (rejected: traversal and symlink risk); rebuild only known frontmatter (rejected: drops unrelated metadata).

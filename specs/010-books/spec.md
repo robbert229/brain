@@ -62,6 +62,23 @@ Each shelf entry also carries the interest level and status recorded on the note
 
 ---
 
+### User Story 4 - Edit an existing book review (Priority: P2)
+
+A signed-in contributor or administrator opens an edit action on a shelf entry, changes its title, author, rating, cover, finished date, or review, and saves. The selected note is updated in place and the shelf reflects the changes.
+
+**Why this priority**: Editing lets contributors correct mistakes in existing records while keeping the vault note as the source of truth.
+
+**Independent Test**: Edit a nested book note and verify the same file remains, the changed fields appear on the shelf, unrelated frontmatter remains intact, and viewers cannot access or submit edits.
+
+**Acceptance Scenarios**:
+
+1. **Given** a writable shelf and a contributor, **When** they choose Edit on a book, **Then** a form opens prefilled with that note's title, author, rating, cover, finished date, and review.
+2. **Given** a valid edit to a nested book note, **When** the contributor saves it, **Then** the same file is updated in place, unrelated frontmatter is preserved, and the shelf shows the changes.
+3. **Given** a viewer or anonymous visitor, **When** they request or submit an edit, **Then** the request is refused.
+4. **Given** read-only mode or an unsafe note path, **When** an edit is requested, **Then** editing is unavailable and no file outside the Books folder is changed.
+
+---
+
 ### Edge Cases
 
 - Malformed or unreadable metadata on one note must not blank the shelf: the entry is skipped or shown with its filename as title, and other books still render.
@@ -72,6 +89,8 @@ Each shelf entry also carries the interest level and status recorded on the note
 - The Books folder is missing or empty: the shelf renders an "no books yet" state, not an error.
 - Notes whose frontmatter is valid YAML but not a mapping (list or scalar): skipped as non-books.
 - Image attachments that are not images (wrong extension) or unreadable: treated as missing covers.
+- Editing a nested note must retain its relative path; traversal, absolute paths, symlinks, and non-book notes are refused.
+- Editing must preserve unrelated frontmatter and must not create a duplicate note.
 
 ## Requirements *(mandatory)*
 
@@ -89,6 +108,12 @@ Each shelf entry also carries the interest level and status recorded on the note
 - **FR-010**: The service MUST reject unsafe inputs: cover names resolving outside the attachments folder, titles that would escape the Books folder, review text beyond the configured per-note size limit, and control characters in titles.
 - **FR-011**: A single malformed note MUST NOT prevent the remaining books from being listed.
 - **FR-012**: Serving cover images MUST NOT expose any file outside the configured attachments folder.
+- **FR-013**: In writable mode, the shelf MUST offer an edit action to contributor and administrator sessions.
+- **FR-014**: The edit form MUST be prefilled with the selected note's title, author, rating, cover, finished date, and review.
+- **FR-015**: A successful edit MUST update the selected Markdown note in place, preserve unrelated frontmatter and its folder, and MUST NOT create a duplicate note.
+- **FR-016**: Edits MUST apply the same field validation and per-note size limit as review creation.
+- **FR-017**: The edit operation MUST refuse traversal, absolute paths, symlink escapes, and notes that are not book notes.
+- **FR-018**: The edit form and submit route MUST require contributor or administrator rights; edit submissions MUST pass the existing CSRF check. Read-only mode MUST hide edit actions and refuse edit requests.
 
 ### Key Entities
 
@@ -103,13 +128,16 @@ Each shelf entry also carries the interest level and status recorded on the note
 - **SC-002**: A contributor can go from opening the form to seeing their new book on the shelf in under one minute, and the stored note opens in Obsidian with its metadata intact and no migration or repair needed.
 - **SC-003**: Every book with a readable supported cover displays that cover; every book without one shows the bundled fallback cover, with zero broken-image indicators.
 - **SC-004**: Anonymous visitors and viewer-role members cannot read the shelf or file a review; no book title or cover is disclosed to them.
+- **SC-005**: A contributor can edit any nested shelf entry without creating a duplicate or moving its note.
+- **SC-006**: Existing unrelated frontmatter remains intact after an edit; unauthorized and read-only edit requests never change a file.
 
 ## Assumptions
 
 - The vault layout matches the live installation: book notes under `01 - Note Box/Hobby/Books/` and image attachments under `06 - Meta/Attachments/`, both beneath the service data directory; both folder paths are configuration, not hard-coded behavior.
 - Existing note conventions are the contract for generated notes (frontmatter keys `author`, `cover`, `interest`, `status (Media)`, `finished`, `rating`; title as `#` heading; `![[cover.jpg]]` embed), validated against the provided examples.
-- One submitted review creates one new book note; editing or deleting notes through the web interface is out of scope (future features).
+- One submitted review creates one new book note; editing updates an existing note in place. Deleting notes through the web interface is out of scope.
 - Filtering (by status, author, rating) and detail pages are out of scope for this feature; the shelf shows everything newest-first.
 - The existing authentication and session system (spec 002) provides identity, roles, and CSRF protection; this feature adds no new authentication of its own.
 - "Newest first" means the recorded finished date; books with no finished date sort after dated books, alphabetically.
-- The service's single-writer ownership of the data directory (spec 001) holds, so no concurrent-modulation handling beyond atomic writes is required.
+- The service's single-writer ownership of the data directory (spec 001) holds, so no concurrent-mutation handling beyond atomic writes is required.
+- Editing changes title, author, rating, cover, finished date, and review; status and interest remain sourced from existing note metadata.

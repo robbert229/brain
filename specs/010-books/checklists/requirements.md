@@ -39,3 +39,5 @@
   an established library; full spec-kit ceremony.
 - FR-005 requires readable supported attachments to render as covers and all absent or
   unusable attachments to render the bundled accessible fallback offline.
+- Edit existing book notes in place with role, CSRF, read-only, path-confinement, and
+  unrelated-frontmatter preservation requirements.
