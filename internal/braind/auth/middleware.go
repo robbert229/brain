@@ -119,6 +119,7 @@ func (s Session) Identity() Identity {
 		Subject:    s.Subject,
 		UserClaim:  s.UserClaim,
 		Groups:     append([]string(nil), s.Groups...),
+		Role:       s.Role,
 		VerifiedAt: s.LastVerifiedAt,
 	}
 }

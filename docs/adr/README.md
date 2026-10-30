@@ -16,3 +16,4 @@ behavior and acceptance criteria live in the feature specs under `specs/`.
 | [0009](0009-private-obsidian-headless-artifacts.md) | Keep Obsidian Headless artifacts private | Accepted |
 | [0010](0010-adopt-standard-oidc-libraries.md) | Use go-oidc and oauth2 for OIDC protocol mechanics | Accepted |
 | [0011](0011-use-pico-css-for-page-theming.md) | Use Pico CSS for page theming | Accepted |
+| [0012](0012-accept-yaml-v3-for-frontmatter-parsing.md) | Use yaml.v3 for book-note frontmatter parsing | Accepted |

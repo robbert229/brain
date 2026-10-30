@@ -21,11 +21,14 @@ const (
 )
 
 // Identity is a provider-verified person as captured at a successful callback
-// (data-model.md). It is never serialized to the browser.
+// (data-model.md). It is never serialized to the browser. Role is carried so
+// handlers can vary presentation (for example, offering a write affordance)
+// without re-deciding the authorization already enforced by RequireAuth.
 type Identity struct {
 	Subject    string
 	UserClaim  string
 	Groups     []string
+	Role       Role
 	VerifiedAt time.Time
 }
 

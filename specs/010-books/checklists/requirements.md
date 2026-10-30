@@ -1,0 +1,43 @@
+# Specification Quality Checklist: Book Reviews
+
+**Purpose**: Validate specification completeness and quality before proceeding to planning
+**Created**: 2026-10-30
+**Feature**: [spec.md](../spec.md)
+
+## Content Quality
+
+- [x] No implementation details (languages, frameworks, APIs)
+- [x] Focused on user value and business needs
+- [x] Written for non-technical stakeholders
+- [x] All mandatory sections completed
+
+## Requirement Completeness
+
+- [x] No [NEEDS CLARIFICATION] markers remain
+- [x] Requirements are testable and unambiguous
+- [x] Success criteria are measurable
+- [x] Success criteria are technology-agnostic (no implementation details)
+- [x] All acceptance scenarios are defined
+- [x] Edge cases are identified
+- [x] Scope is clearly bounded
+- [x] Dependencies and assumptions identified
+
+## Feature Readiness
+
+- [x] All functional requirements have clear acceptance criteria
+- [x] User scenarios cover primary flows
+- [x] Feature meets measurable outcomes defined in Success Criteria
+- [x] No implementation details leak into specification
+
+## Notes
+
+- Metadata key names (`author`, `cover`, `rating`, …) and the `n/5` rating format are
+  domain data conventions observed in the user's existing vault notes, not implementation
+  choices; they define the interoperability contract with Obsidian (Principle V).
+- Product decisions pre-resolved with the user before drafting: one review = one new
+  note; covers resolve from `06 - Meta/Attachments/`; YAML frontmatter parsing may use
+  an established library; full spec-kit ceremony.
+- FR-005 requires readable supported attachments to render as covers and all absent or
+  unusable attachments to render the bundled accessible fallback offline.
+- Edit existing book notes in place with role, CSRF, read-only, path-confinement, and
+  unrelated-frontmatter preservation requirements.

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 360" role="img" aria-labelledby="title desc">
+  <title id="title">Cover unavailable</title>
+  <desc id="desc">A violet book with a simple open-book mark.</desc>
+  <defs>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#70539e"/>
+      <stop offset="1" stop-color="#3f2c68"/>
+    </linearGradient>
+  </defs>
+  <rect width="240" height="360" rx="14" fill="url(#paper)"/>
+  <path d="M36 50h8v260h-8z" fill="#fff" opacity=".22"/>
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="7" opacity=".9">
+    <path d="M120 137c-21-16-43-19-66-12v83c23-7 45-4 66 12 21-16 43-19 66-12v-83c-23-7-45-4-66 12z"/>
+    <path d="M120 137v83"/>
+  </g>
+  <path d="M72 258h96" stroke="#fff" stroke-linecap="round" stroke-width="5" opacity=".7"/>
+  <path d="M87 277h66" stroke="#fff" stroke-linecap="round" stroke-width="4" opacity=".45"/>
+</svg>

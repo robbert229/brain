@@ -1,0 +1,26 @@
+# Debug image variant (make image-debug / image-publish-debug). Identical
+# build to .ko.yaml except the base: Ubuntu instead of distroless, so
+# `kubectl exec` gets a bash shell inside the running pod for debugging.
+#
+# Dev/manual use only — never publish this as a release image. The container
+# still runs as the daemon's nonroot user (UID 65532) because the
+# StatefulSet's pod securityContext overrides the image's root user; the
+# read-only root filesystem stays intact.
+#
+# Selected via KO_CONFIG_PATH by the Makefile's debug targets.
+defaultBaseImage: docker.io/library/ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+defaultPlatforms:
+  - linux/amd64
+  - linux/arm64
+defaultEnv:
+  - CGO_ENABLED=0
+builds:
+  - id: braind
+    dir: .
+    main: ./cmd/braind
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X main.version={{.Git.ShortCommit}}

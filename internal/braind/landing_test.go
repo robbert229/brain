@@ -49,6 +49,17 @@ func TestLandingPageCopy(t *testing.T) {
 	}
 }
 
+// TestLandingPageLinksToBooks pins FR-001: the landing page offers the shelf.
+func TestLandingPageLinksToBooks(t *testing.T) {
+	body := getLandingBody(t)
+	if !strings.Contains(body, `href="/books"`) {
+		t.Errorf("landing page lacks the /books link (FR-001)")
+	}
+	if !strings.Contains(body, "Browse the shelf") {
+		t.Errorf("landing page lacks the books card copy")
+	}
+}
+
 func TestLandingPageRejectsNonGET(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/", nil))

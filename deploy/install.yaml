@@ -97,6 +97,10 @@ spec:
               value: 0.0.0.0:8080
             - name: BRAIND_DATA_PATH
               value: /data
+            - name: BRAIND_BOOKS_FOLDER
+              value: "01 - Note Box/Hobby/Books"
+            - name: BRAIND_COVERS_FOLDER
+              value: "06 - Meta/Attachments"
             - name: BRAIND_VAULT_PATH
               value: /data/vault
             - name: BRAIND_GIT_DIR

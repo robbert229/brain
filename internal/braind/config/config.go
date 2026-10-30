@@ -20,6 +20,8 @@ const (
 	EnvExternalURL             = "BRAIND_EXTERNAL_URL"
 	EnvDataPath                = "BRAIND_DATA_PATH"
 	EnvVaultPath               = "BRAIND_VAULT_PATH"
+	EnvBooksFolder             = "BRAIND_BOOKS_FOLDER"
+	EnvCoversFolder            = "BRAIND_COVERS_FOLDER"
 	EnvReadOnly                = "BRAIND_READ_ONLY"
 	EnvSyncEnabled             = "BRAIND_SYNC_ENABLED"
 	EnvOBPath                  = "BRAIND_OB_PATH"
@@ -90,6 +92,8 @@ type Server struct {
 type Vault struct {
 	DataPath     string
 	VaultPath    string
+	BooksFolder  string
+	CoversFolder string
 	ReadOnly     bool
 	MaxNoteBytes int64
 }
@@ -221,6 +225,8 @@ func Load(lookup LookupEnv) (Config, error) {
 		vault: Vault{
 			DataPath:     read(EnvDataPath, "/data"),
 			VaultPath:    read(EnvVaultPath, "/data/vault"),
+			BooksFolder:  read(EnvBooksFolder, "01 - Note Box/Hobby/Books"),
+			CoversFolder: read(EnvCoversFolder, "06 - Meta/Attachments"),
 			ReadOnly:     readBool(EnvReadOnly, false),
 			MaxNoteBytes: readPositiveBytes(EnvMaxNoteBytes, "2MiB"),
 		},
@@ -288,6 +294,15 @@ func validate(config *Config, errs *[]error) {
 	}
 	if !isPathWithin(config.vault.DataPath, config.vault.VaultPath) {
 		*errs = append(*errs, fmt.Errorf("%s: must be an absolute path beneath %s", EnvVaultPath, EnvDataPath))
+	}
+	// Spec 010: the books shelf and covers folders are relative sub-paths of
+	// the data directory, so the data lock always covers them (research R7).
+	// A missing folder is not a configuration error: the shelf renders empty.
+	if !isRelativeSubpath(config.vault.BooksFolder) {
+		*errs = append(*errs, fmt.Errorf("%s: must be a relative sub-path of %s with no %s segments", EnvBooksFolder, EnvDataPath, ".."))
+	}
+	if !isRelativeSubpath(config.vault.CoversFolder) {
+		*errs = append(*errs, fmt.Errorf("%s: must be a relative sub-path of %s with no %s segments", EnvCoversFolder, EnvDataPath, ".."))
 	}
 	if strings.TrimSpace(config.sync.OBPath) == "" {
 		*errs = append(*errs, fmt.Errorf("%s: must not be empty", EnvOBPath))
@@ -469,6 +484,21 @@ func isPathWithin(parent, child string) bool {
 	return err == nil && relative != "." && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
+// isRelativeSubpath reports whether value can be safely joined beneath the data
+// directory: a non-empty relative path whose segments never escape upward
+// (spec 010 research R7).
+func isRelativeSubpath(value string) bool {
+	if value == "" || filepath.IsAbs(value) {
+		return false
+	}
+	for _, segment := range strings.Split(filepath.ToSlash(value), "/") {
+		if segment == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 func require(name, value string, errs *[]error) {
 	if strings.TrimSpace(value) == "" {
 		*errs = append(*errs, fmt.Errorf("%s: required", name))
@@ -514,6 +544,8 @@ func (c Config) Diagnostics() map[string]string {
 		EnvShutdownTimeout:         c.server.ShutdownTimeout.String(),
 		EnvDataPath:                c.vault.DataPath,
 		EnvVaultPath:               c.vault.VaultPath,
+		EnvBooksFolder:             c.vault.BooksFolder,
+		EnvCoversFolder:            c.vault.CoversFolder,
 		EnvReadOnly:                strconv.FormatBool(c.vault.ReadOnly),
 		EnvSyncEnabled:             strconv.FormatBool(c.sync.Enabled),
 		EnvOBPath:                  c.sync.OBPath,
