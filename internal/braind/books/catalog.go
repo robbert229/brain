@@ -1,7 +1,7 @@
 package books
 
 import (
-	"bytes"
+	"encoding/binary"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -97,11 +97,11 @@ func isMarkdown(name string) bool {
 	return strings.EqualFold(filepath.Ext(name), ".md")
 }
 
-// coverFound resolves the cover by filename inside the covers folder only
-// (FR-005, FR-012); Cover is already a single clean image segment, so the join
-// cannot escape, and anything unreadable, empty, or a directory is "no cover".
+// coverFound accepts only a readable supported image opened beneath the
+// configured covers root. Missing, invalid, empty, and escaping symlink
+// targets are treated as absent covers (FR-005, FR-012).
 func coverFound(coversDir, cover string) bool {
-	if cover == "" {
+	if !IsImageName(cover) {
 		return false
 	}
 	root, err := os.OpenRoot(coversDir)
@@ -124,24 +124,27 @@ func coverFound(coversDir, cover string) bool {
 	return true
 }
 
-func validateImage(file io.ReadSeeker, name string) error {
-	var header [512]byte
-	n, err := io.ReadFull(file, header[:])
-	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
-		return err
-	}
-	headerBytes := header[:n]
+func validateImage(file *os.File, name string) error {
 	ext := strings.ToLower(filepath.Ext(name))
 	if ext == ".webp" {
-		if n < 12 || string(headerBytes[:4]) != "RIFF" || string(headerBytes[8:12]) != "WEBP" {
+		var header [20]byte
+		n, err := io.ReadFull(file, header[:])
+		if err != nil || n < len(header) || string(header[:4]) != "RIFF" || string(header[8:12]) != "WEBP" {
+			return io.ErrUnexpectedEOF
+		}
+		chunk := string(header[12:16])
+		chunkSize := binary.LittleEndian.Uint32(header[16:20])
+		riffSize := binary.LittleEndian.Uint32(header[4:8])
+		info, statErr := file.Stat()
+		if statErr != nil || (chunk != "VP8 " && chunk != "VP8L" && chunk != "VP8X") || chunkSize == 0 || riffSize < 12+chunkSize || int64(riffSize)+8 > info.Size() {
 			return io.ErrUnexpectedEOF
 		}
 	} else {
-		if _, _, err := image.DecodeConfig(bytes.NewReader(headerBytes)); err != nil {
+		if _, _, err := image.DecodeConfig(file); err != nil {
 			return err
 		}
 	}
-	_, err = file.Seek(0, io.SeekStart)
+	_, err := file.Seek(0, io.SeekStart)
 	return err
 }
 

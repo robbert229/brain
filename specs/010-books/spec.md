@@ -22,9 +22,10 @@ A signed-in person follows the "Books" link from the landing page and sees every
 
 1. **Given** a data directory with book notes in nested folders, **When** an authorized person opens the books page, **Then** every book note appears exactly once regardless of folder depth.
 2. **Given** a book note with a cover reference whose image exists among the vault's attachments, **When** the list renders, **Then** the cover image is displayed.
-3. **Given** a book note whose cover image does not exist, **When** the list renders, **Then** a neutral placeholder is shown instead of a broken image.
-4. **Given** folder index notes that carry no book metadata, **When** the list renders, **Then** they are not shown as books.
-5. **Given** an anonymous visitor, **When** they request the books page, **Then** they are sent to sign in and no book data is exposed.
+3. **Given** a book note whose cover is absent, missing, unreadable, empty, corrupt, or not a supported image, **When** the list renders, **Then** a designed fallback cover is shown instead of an empty tile or broken image.
+4. **Given** a book note whose supported cover image is readable, **When** the list renders, **Then** the real cover is shown. The fallback has the same dimensions and an accessible description; it is bundled with the service and works offline.
+5. **Given** folder index notes that carry no book metadata, **When** the list renders, **Then** they are not shown as books.
+6. **Given** an anonymous visitor, **When** they request the books page, **Then** they are sent to sign in and no book data is exposed.
 
 ---
 
@@ -67,6 +68,7 @@ Each shelf entry also carries the interest level and status recorded on the note
 - Two notes with the same title (or a submitted title colliding with an existing filename): both appear in the shelf; a new review never overwrites an existing note (a distinct filename is chosen).
 - Very large review bodies or absurdly deep folder trees: bounded, with a clear refusal rather than unbounded memory use.
 - Cover filenames that reference other folders, absolute paths, or `..` traversal: refused or ignored, never served.
+- Attachments with an image extension but invalid image data, no read permission, or zero bytes are treated as missing covers; a fallback cover is rendered.
 - The Books folder is missing or empty: the shelf renders an "no books yet" state, not an error.
 - Notes whose frontmatter is valid YAML but not a mapping (list or scalar): skipped as non-books.
 - Image attachments that are not images (wrong extension) or unreadable: treated as missing covers.
@@ -79,7 +81,7 @@ Each shelf entry also carries the interest level and status recorded on the note
 - **FR-002**: The shelf MUST list every book note found by recursively scanning the configured Books folder beneath the service's data directory.
 - **FR-003**: A note counts as a book when it carries book metadata (a status, rating, or cover field in its frontmatter); notes without any such metadata (for example folder index notes) MUST NOT be listed as books.
 - **FR-004**: Each shelf entry MUST show title, review text, and any recorded author, rating, finished date, interest, and status; missing values MUST degrade gracefully.
-- **FR-005**: Each shelf entry MUST show the book's cover image resolved by filename from the configured attachments folder; when the image does not exist or is unreadable, a placeholder MUST be shown instead of a broken reference.
+- **FR-005**: Each shelf entry MUST show its cover image resolved by filename from the configured attachments folder when the attachment is a readable, non-empty supported image. When a cover is absent, missing, unreadable, empty, corrupt, or not a supported image, the shelf MUST show a designed fallback cover instead of an empty tile or broken image. The fallback MUST have the same cover dimensions, an accessible text alternative, and be available offline as part of the service.
 - **FR-006**: The shelf MUST be ordered newest-first by finished date, with undated books after dated ones, then by title.
 - **FR-007**: Signed-in users with contributor or administrator rights MUST be able to submit a review form with a required title, an optional author, an optional rating (`n/5`, halves allowed), an optional cover filename, and the review text.
 - **FR-008**: A successful submission MUST durably create one new Markdown note in the configured Books folder whose frontmatter and body match the vault's existing book-note conventions (metadata block, title heading, review text, cover embed), MUST NOT overwrite any existing note, and MUST then appear on the shelf.
@@ -99,7 +101,7 @@ Each shelf entry also carries the interest level and status recorded on the note
 
 - **SC-001**: From the landing page, a signed-in person reaches the complete shelf in one click; a fixture shelf of 130 books in nested folders lists all 130, each exactly once.
 - **SC-002**: A contributor can go from opening the form to seeing their new book on the shelf in under one minute, and the stored note opens in Obsidian with its metadata intact and no migration or repair needed.
-- **SC-003**: 100% of books whose cover image exists in the attachments folder display their cover; every book without a resolvable cover shows the placeholder (no broken-image affordances).
+- **SC-003**: Every book with a readable supported cover displays that cover; every book without one shows the bundled fallback cover, with zero broken-image indicators.
 - **SC-004**: Anonymous visitors and viewer-role members cannot read the shelf or file a review; no book title or cover is disclosed to them.
 
 ## Assumptions

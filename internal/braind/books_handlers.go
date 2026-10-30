@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -154,7 +153,7 @@ func (s *booksSurface) cover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "private, max-age=3600")
-	http.ServeContent(w, r, name, info.ModTime(), file.(io.ReadSeeker))
+	http.ServeContent(w, r, name, info.ModTime(), file)
 }
 
 // writePageHeaders applies the shared headers for session-gated pages

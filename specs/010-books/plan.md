@@ -15,7 +15,7 @@ a plain HTML form that durably creates a new Obsidian-convention book note in th
 folder. Implemented as a new `internal/braind/books` package (parser, catalog, writer)
 wired into the existing `newHandler` mux behind the spec 002 auth surface, with page
 templates in the existing embedded `webassets` and covers served from the configured
-attachments folder.
+attachments folder. Supported covers are checked for readable image data; unavailable covers use a bundled accessible fallback image with the same dimensions.
 
 ## Technical Context
 
@@ -45,7 +45,7 @@ attachments folder.
 | --- | --- | --- |
 | Independently testable without other features or live services | I | **PASS** — `books` package exercised by unit tests over fixture directories; handlers tested with `httptest` and the real `auth` surface; CI-runnable, no shared mutable state. |
 | Business logic explicit, named, typed, directly tested | II | **PASS** — book detection, field parsing, sort order, form validation, filename safety are named functions in `books` with table-driven tests; templates only render. |
-| Simplest solution; no unproven abstraction | III | **PASS** — scan-per-request (no cache/index layer), `os.DirFS` + `http.ServeFileFS` for covers, one template per page, no interfaces/repository pattern. Single new dependency (`yaml.v3`) justified as pure mechanics per ADR-0010 precedent. |
+| Simplest solution; no unproven abstraction | III | **PASS** — scan-per-request (no cache/index layer), rooted filesystem access for covers to prevent symlink escape, one template per page, no interfaces/repository pattern. Single new dependency (`yaml.v3`) justified as pure mechanics per ADR-0010 precedent. |
 | Go backend; server-rendered HTML + HTMX; core flows work without JS | IV | **PASS** — shelf and form are server-rendered `html/template` output; review submission is a plain `<form method=post>` with CSRF field; htmx not required for any flow. |
 | Markdown is the single source of truth for note content | V | **PASS** — a review is stored as an ordinary Obsidian-convention `.md` file in the Books folder; nothing written to any other store; shelf is derived and recomputable. |
 | Data & Storage: durable writes, derived data never authoritative | — | **PASS** — atomic create (`O_EXCL` temp + fsync + rename + dir fsync); shelf never persisted; covers are read-only projections of the attachments folder. |

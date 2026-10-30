@@ -37,3 +37,5 @@
 - Product decisions pre-resolved with the user before drafting: one review = one new
   note; covers resolve from `06 - Meta/Attachments/`; YAML frontmatter parsing may use
   an established library; full spec-kit ceremony.
+- FR-005 requires readable supported attachments to render as covers and all absent or
+  unusable attachments to render the bundled accessible fallback offline.

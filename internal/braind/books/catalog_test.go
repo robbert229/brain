@@ -1,7 +1,13 @@
 package books
 
 import (
+	"bytes"
 	"fmt"
+	"image"
+	"image/color"
+	"image/gif"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +45,30 @@ func bookNote(title, cover, finished, rating string) string {
 	return b.String()
 }
 
+func validImageBytes(t *testing.T, ext string) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.White)
+	var encoded bytes.Buffer
+	var err error
+	switch ext {
+	case ".jpg", ".jpeg":
+		err = jpeg.Encode(&encoded, img, nil)
+	case ".png":
+		err = png.Encode(&encoded, img)
+	case ".gif":
+		err = gif.Encode(&encoded, img, nil)
+	case ".webp":
+		return []byte("RIFF\x10\x00\x00\x00WEBPVP8 \x04\x00\x00\x00DATA")
+	default:
+		t.Fatalf("unsupported fixture extension %q", ext)
+	}
+	if err != nil {
+		t.Fatalf("encode %s fixture: %v", ext, err)
+	}
+	return encoded.Bytes()
+}
+
 // fixtureShelf mirrors the live layout: nested series folders, Waypoint index
 // notes, a coverless book, and a malformed note (quickstart.md).
 func fixtureShelf(t *testing.T) (booksDir, coversDir string) {
@@ -51,7 +81,7 @@ func fixtureShelf(t *testing.T) (booksDir, coversDir string) {
 	writeNote(t, booksDir, "Books.md", "---\ntags:\n  - Hobby/Books\n---\n# Books\n%% Begin Waypoint %%\n")
 	writeNote(t, booksDir, "Level One God/Level One God.md", "---\ntags:\n- Hobby/Books\n---\n# Level One God\n%% Begin Waypoint %%\n")
 	writeNote(t, booksDir, "Broken.md", "---\ncover: broken.jpg\n\tbroken: true\n---\n# Broken\n")
-	if err := os.WriteFile(filepath.Join(coversDir, "dcc6.jpg"), []byte("\xff\xd8\xffjpegbytes"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(coversDir, "dcc6.jpg"), validImageBytes(t, ".jpg"), 0o644); err != nil {
 		t.Fatalf("write cover: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(coversDir, "log1.jpg"), nil, 0o644); err != nil {
@@ -114,6 +144,42 @@ func TestScanCoverResolution(t *testing.T) {
 	}
 	if found["Level One God 2"] || found["Undated Find"] {
 		t.Error("notes without covers must not claim one")
+	}
+}
+
+func TestCoverFoundRequiresReadableSupportedImage(t *testing.T) {
+	coversDir := t.TempDir()
+	for _, ext := range []string{".jpg", ".png", ".gif", ".webp"} {
+		if err := os.WriteFile(filepath.Join(coversDir, "valid"+ext), validImageBytes(t, ext), 0o644); err != nil {
+			t.Fatalf("write valid %s cover: %v", ext, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(coversDir, "corrupt.jpg"), []byte("not an image"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(coversDir, "empty.png"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(coversDir, "unreadable.jpg"), validImageBytes(t, ".jpg"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.jpg")
+	if err := os.WriteFile(outside, validImageBytes(t, ".jpg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(coversDir, "outside.jpg")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	for _, ext := range []string{".jpg", ".png", ".gif", ".webp"} {
+		if !coverFound(coversDir, "valid"+ext) {
+			t.Errorf("valid supported image %s was not recognized", ext)
+		}
+	}
+	for _, name := range []string{"missing.jpg", "corrupt.jpg", "empty.png", "unreadable.jpg", "outside.jpg", "notes.txt"} {
+		if coverFound(coversDir, name) {
+			t.Errorf("unavailable image %q was recognized as a cover", name)
+		}
 	}
 }
 

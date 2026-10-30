@@ -1,6 +1,10 @@
 package braind
 
 import (
+	"bytes"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -77,7 +81,13 @@ func (f *booksFixture) writeCover(t *testing.T, name string) {
 	if err := os.MkdirAll(f.coversDir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(f.coversDir, name), []byte("\xff\xd8\xffjpeg"), 0o644); err != nil {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	img.Set(0, 0, color.White)
+	var content bytes.Buffer
+	if err := jpeg.Encode(&content, img, nil); err != nil {
+		t.Fatalf("encode cover: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(f.coversDir, name), content.Bytes(), 0o644); err != nil {
 		t.Fatalf("write cover: %v", err)
 	}
 }
@@ -183,8 +193,8 @@ func TestBooksShelfListsEveryBookNote(t *testing.T) {
 	if !strings.Contains(body, `src="/books/covers/dcc6.jpg"`) {
 		t.Error("resolved cover must render as an img")
 	}
-	if strings.Contains(body, `src="/books/covers/broken.jpg"`) || strings.Count(body, `class="cover placeholder"`) < 1 {
-		t.Error("missing cover must render the placeholder, never a broken img")
+	if strings.Contains(body, `src="/books/covers/broken.jpg"`) || !strings.Contains(body, `src="/static/book-cover-placeholder.svg" alt="No cover available for Immortality Starts With Generosity"`) {
+		t.Error("missing cover must render the accessible fallback, never a broken img")
 	}
 }
 
@@ -286,6 +296,13 @@ func TestCoverServing(t *testing.T) {
 func TestCoverServingRejectsUnsafeNames(t *testing.T) {
 	fixture := newBooksFixture(t, nil)
 	fixture.writeCover(t, "dcc6.jpg")
+	outside := filepath.Join(t.TempDir(), "outside.jpg")
+	if err := os.WriteFile(outside, []byte("outside attachment root"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(fixture.coversDir, "outside.jpg")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
 	for _, target := range []string{
 		"/books/covers/..%2Fsecret.jpg",
 		"/books/covers/..%2F..%2F%2E%2E%2Fetc%2Fpasswd",
@@ -293,6 +310,7 @@ func TestCoverServingRejectsUnsafeNames(t *testing.T) {
 		"/books/covers/notes.txt",
 		"/books/covers/diagram.svg",
 		"/books/covers/missing.jpg",
+		"/books/covers/outside.jpg",
 		"/books/covers/",
 	} {
 		recorder := httptest.NewRecorder()
