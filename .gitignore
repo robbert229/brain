@@ -34,6 +34,7 @@ tmp
 
 # Local output from `make image-publish`.
 /image-ref.txt
+/image-ref-debug.txt
 
 .opencode
 .idea
