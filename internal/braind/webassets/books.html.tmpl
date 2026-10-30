@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Books · {{.ProductName}}</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <main id="main" class="container">
+    <hgroup>
+      <h1>Books</h1>
+      <p class="tagline">the reading record, straight from the vault</p>
+    </hgroup>
+    {{if .CanCreate}}
+    <p><a role="button" href="/books/new">Add a review</a></p>
+    {{end}}
+    {{if .Entries}}
+    {{range .Entries}}
+    <article class="book-card" aria-label="{{.Title}}">
+      {{if .CoverFound}}<img class="cover" src="/books/covers/{{.Cover}}" alt="Cover of {{.Title}}" loading="lazy">{{else}}<div class="cover placeholder" aria-hidden="true"></div>{{end}}
+      <h2>{{.Title}}</h2>
+      <p class="byline">{{.Byline}}</p>
+      {{if or .Interest .Status}}<p class="chips">{{.Interest}}{{if and .Interest .Status}} · {{end}}{{.Status}}</p>{{end}}
+      <div class="review">{{.Review}}</div>
+    </article>
+    {{end}}
+    <footer>
+      {{if .Truncated}}<p class="muted">Showing the first books found — the folder holds more than the scan budget.</p>{{end}}
+      {{if .Skipped}}<p class="muted">{{.Skipped}} notes skipped (no book metadata or unreadable).</p>{{end}}
+    </footer>
+    {{else}}
+    <p>There are no books yet. Add your first review to fill the shelf.</p>
+    {{end}}
+    <p><a href="/">Back to brain</a></p>
+  </main>
+</body>
+</html>

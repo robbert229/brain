@@ -30,6 +30,9 @@ func TestLoadDefaultsWithRequiredValues(t *testing.T) {
 	if got := config.Vault(); got.DataPath != "/data" || got.VaultPath != "/data/vault" || got.ReadOnly || got.MaxNoteBytes != 2*1024*1024 {
 		t.Fatalf("unexpected vault defaults: %+v", got)
 	}
+	if got := config.Vault(); got.BooksFolder != "01 - Note Box/Hobby/Books" || got.CoversFolder != "06 - Meta/Attachments" {
+		t.Fatalf("unexpected books/covers folder defaults: %+v", got)
+	}
 	if got := config.Sync(); !got.Enabled || got.OBPath != "ob" {
 		t.Fatalf("unexpected sync defaults: %+v", got)
 	}
@@ -198,6 +201,21 @@ func TestLoadRejectsIncompatibleSettings(t *testing.T) {
 			name:    "vault outside data",
 			changes: map[string]string{EnvVaultPath: "/other/vault"},
 			want:    EnvVaultPath,
+		},
+		{
+			name:    "books folder absolute",
+			changes: map[string]string{EnvBooksFolder: "/etc"},
+			want:    EnvBooksFolder,
+		},
+		{
+			name:    "covers folder escapes data root",
+			changes: map[string]string{EnvCoversFolder: "../elsewhere"},
+			want:    EnvCoversFolder,
+		},
+		{
+			name:    "books folder empty",
+			changes: map[string]string{EnvBooksFolder: ""},
+			want:    EnvBooksFolder,
 		},
 		{
 			name:    "Git metadata in vault",

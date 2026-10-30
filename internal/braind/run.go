@@ -131,6 +131,7 @@ func run(ctx context.Context, args []string, version, commit string, stdout, std
 		vaultPath:   processConfig.Vault().VaultPath,
 		statusStore: statusStore,
 		auth:        authSurface,
+		books:       newBooksSurface(processConfig.Vault()),
 	})
 	if err := serve(ctx, listener, logging.HTTPMiddleware(logger, serverHandler), processConfig.Server().ShutdownTimeout, beginShutdown); err != nil {
 		serverLogger.Error("server stopped with error", "error", err)
@@ -169,6 +170,7 @@ type handlerState struct {
 	vaultPath   string               // local vault directory probed by readiness
 	statusStore *status.Store        // operational snapshot publisher, nil until wired
 	auth        *authSurface         // OIDC sign-in surface, nil only for the unwired Handler() export
+	books       *booksSurface        // bookshelf surface (spec 010), nil only for the unwired export
 }
 
 func newHandler(state handlerState) http.Handler {
@@ -214,6 +216,11 @@ func newHandler(state handlerState) http.Handler {
 		landing = state.auth.handler.RequireAuth(auth.Policy{}, landing)
 	}
 	mux.Handle("GET /{$}", landing)
+	// Spec 010: the books shelf shares the sign-in surface; without one wired
+	// its routes stay absent, like the sign-in routes themselves.
+	if state.auth != nil && state.books != nil {
+		state.books.register(mux, state.auth.handler)
+	}
 	// Spec 002: the sign-in surface is mandatory and always registered in run().
 	// Probes, status, and static assets stay registered above so they remain
 	// reachable without a provider round trip (ADR-0003).
