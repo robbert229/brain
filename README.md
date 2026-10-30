@@ -7,13 +7,17 @@ the [feature specs](specs/) for planned capabilities.
 
 ## Run locally
 
-Requires Go 1.22 or newer.
+Requires Go 1.26 or newer.
 
 ```bash
 BRAIND_DATA_PATH=/tmp/braind-data \
 BRAIND_VAULT_PATH=/tmp/braind-data/vault \
 BRAIND_GIT_DIR=/tmp/braind-data/git/vault.git \
-OIDC_ENABLED=false BRAIND_GIT_BACKUP_ENABLED=false go run ./cmd/braind
+OIDC_CONFIGURATION_URL=https://oidc.example.test/.well-known/openid-configuration \
+OIDC_CLIENT_ID=braind OIDC_CLIENT_SECRET=dev-secret \
+OIDC_ADMIN_GROUP=access-brain-admin OIDC_USER_GROUP=access-brain-user \
+OIDC_VIEWER_GROUP=access-brain-viewer \
+BRAIND_GIT_BACKUP_ENABLED=false go run ./cmd/braind
 ```
 
 In another terminal, check the daemon:
@@ -22,8 +26,12 @@ In another terminal, check the daemon:
 curl http://127.0.0.1:8080/healthz
 ```
 
-The default listen address is `0.0.0.0:8080`. The local example disables OIDC
-and Git backup because those subsystems are not implemented yet. `braind` can
+The default listen address is `0.0.0.0:8080`. OIDC is mandatory: point the
+`OIDC_*` settings at your identity provider to make sign-in work. The example
+above uses a placeholder issuer, which lets the daemon start (probes and status
+stay reachable; the landing page redirects to sign-in, which reports
+`authentication_unavailable` until a real provider is configured). Git backup
+is disabled because it is not implemented yet. `braind` can
 also load settings from a `.env` file in the current directory. See the
 [`braind` configuration reference](docs/braind-configuration.md) for details.
 
@@ -44,6 +52,7 @@ kubectl -n brain rollout status statefulset/braind
 
 The bundle provides an in-cluster Service. To make `braind` externally
 reachable, provide an ingress resource for your cluster and configure it for
-your desired host and HTTPS setup. The bundle is a bootstrap install and does
-not include the planned OIDC, Sync, or backup features. See the
+your desired host and HTTPS setup. Sign-in is mandatory, so fill in the OIDC
+block in the manifest (and create the `braind-oidc` secret) before applying.
+Sync and backup stay disabled in this bootstrap install; see the
 [release guide](docs/release.md) for release artifacts and deployment details.

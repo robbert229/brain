@@ -10,7 +10,7 @@ the existing surface.
 
 | Method | Path | Status | Content-Type | Body / Notes |
 | --- | --- | --- | --- | --- |
-| `GET` | `/` | `200 OK` | `text/html; charset=utf-8` | Landing page. MUST contain the product name `brain`, the exact tagline `a second brain, powered by markdown`, and the under-construction notice. Headers: `Cache-Control: public, max-age=3600`; `Content-Security-Policy: default-src 'self'`. |
+| `GET` | `/` | `200 OK` | `text/html; charset=utf-8` | Landing page, behind the shared authentication decision (spec 002): any verified session is served; anonymous browsers `302` to `/login?next=%2F` and API clients (`Accept: application/json`) get `401 {"error":"unauthenticated"}`. MUST contain the product name `brain`, the exact tagline `a second brain, powered by markdown`, and the under-construction notice. Headers: `Cache-Control: private, max-age=3600` (session-gated: never a shared cache); `Content-Security-Policy: default-src 'self'`. |
 | `GET` | `/static/style.css` | `200 OK` | `text/css; charset=utf-8` | Embedded stylesheet. |
 | `GET` | `/static/htmx.min.js` | `200 OK` | `text/javascript; charset=utf-8` | Embedded, vendored htmx `2.0.11`. |
 | `GET` | `/healthz` | `200 OK` | `text/plain; charset=utf-8` | Unchanged: body `ok\n`, `Cache-Control: no-store`. |
@@ -33,7 +33,8 @@ the existing surface.
 
 ## Caching model
 
-- Landing page: `Cache-Control: public, max-age=3600` (static copy, safe to cache briefly).
+- Landing page: `Cache-Control: private, max-age=3600` (static copy, but the
+  route now requires a session, so only private caches may retain it).
 - Static assets: `Cache-Control: public, max-age=3600` with correct content types.
 - `/healthz`: `Cache-Control: no-store` (operational — unchanged).
 

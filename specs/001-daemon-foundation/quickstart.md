@@ -25,16 +25,21 @@ mkdir -p "$VAULT"
 export BRAIND_DATA_PATH="$ROOT" BRAIND_VAULT_PATH="$VAULT" \
        BRAIND_LISTEN_ADDR="127.0.0.1:$PORT" BRAIND_GIT_DIR="$ROOT/git/vault.git" \
        BRAIND_LOG_LEVEL=debug
-unset OIDC_ENABLED BRAIND_SYNC_ENABLED BRAIND_GIT_BACKUP_ENABLED   # run without optional subsystems
+export OIDC_CONFIGURATION_URL=https://oidc.example.test/.well-known/openid-configuration \
+       OIDC_CLIENT_ID=braind OIDC_CLIENT_SECRET=placeholder-secret \
+       OIDC_ADMIN_GROUP=access-brain-admin OIDC_USER_GROUP=access-brain-user \
+       OIDC_VIEWER_GROUP=access-brain-viewer   # OIDC is mandatory; placeholder issuer
+unset BRAIND_SYNC_ENABLED BRAIND_GIT_BACKUP_ENABLED   # run without optional subsystems
 ```
 
 > Note: `BRAIND_GIT_DIR` must be beneath `BRAIND_DATA_PATH` even when backup is
 > disabled (path validation is unconditional), so it is set alongside the temp root.
 
-> Note: with optional subsystems disabled (`OIDC_ENABLED=false`,
-> `BRAIND_SYNC_ENABLED=false`, `BRAIND_GIT_BACKUP_ENABLED=false`) the daemon
-> starts with no external dependencies; otherwise config validation requires
-> their settings.
+> Note: with optional subsystems disabled (`BRAIND_SYNC_ENABLED=false`,
+> `BRAIND_GIT_BACKUP_ENABLED=false`) and the mandatory OIDC settings pointed at
+> a placeholder issuer, the daemon starts with no external dependencies:
+> discovery failure only degrades sign-in, never readiness. Otherwise config
+> validation requires each subsystem's settings.
 
 ## Scenario 1 — Valid startup and probes (SC-001, US1-AC1)
 

@@ -436,11 +436,16 @@ func localEnvironment(t *testing.T) map[string]string {
 	t.Helper()
 	dataRoot := t.TempDir()
 	return map[string]string{
-		config.EnvListenAddr:       "127.0.0.1:0",
-		config.EnvDataPath:         dataRoot,
-		config.EnvVaultPath:        dataRoot + "/vault",
-		config.EnvGitDir:           dataRoot + "/git/vault.git",
-		config.EnvOIDCEnabled:      "false",
-		config.EnvGitBackupEnabled: "false",
+		config.EnvListenAddr:           "127.0.0.1:0",
+		config.EnvDataPath:             dataRoot,
+		config.EnvVaultPath:            dataRoot + "/vault",
+		config.EnvGitDir:               dataRoot + "/git/vault.git",
+		config.EnvOIDCConfigurationURL: "https://oidc.example.test/.well-known/openid-configuration",
+		config.EnvOIDCClientID:         "braind",
+		config.EnvOIDCClientSecret:     "local-environment-client-secret",
+		config.EnvOIDCAdminGroup:       "access-brain-admin",
+		config.EnvOIDCUserGroup:        "access-brain-user",
+		config.EnvOIDCViewerGroup:      "access-brain-viewer",
+		config.EnvGitBackupEnabled:     "false",
 	}
 }

@@ -19,7 +19,6 @@ type SyncState string
 type BackupState string
 
 const (
-	OIDCDisabled OIDCDiscoveryState = "disabled"
 	OIDCPending  OIDCDiscoveryState = "pending"
 	OIDCReady    OIDCDiscoveryState = "ready"
 	OIDCDegraded OIDCDiscoveryState = "degraded"
@@ -72,7 +71,6 @@ type Vault struct {
 }
 
 type OIDC struct {
-	Enabled        bool
 	Discovery      OIDCDiscoveryState
 	Issuer         string
 	ClientID       string
@@ -121,10 +119,6 @@ func Initial(version, commit string, processConfig config.Config, processLifecyc
 	syncConfig := processConfig.Sync()
 	backupConfig := processConfig.Backup()
 
-	oidcState := OIDCDisabled
-	if oidcConfig.Enabled {
-		oidcState = OIDCPending
-	}
 	syncState := SyncDisabled
 	if syncConfig.Enabled {
 		syncState = SyncChecking
@@ -146,8 +140,7 @@ func Initial(version, commit string, processConfig config.Config, processLifecyc
 			ReadOnly: processConfig.Vault().ReadOnly,
 		},
 		OIDC: OIDC{
-			Enabled:      oidcConfig.Enabled,
-			Discovery:    oidcState,
+			Discovery:    OIDCPending,
 			ClientID:     oidcConfig.ClientID,
 			ProviderName: oidcConfig.ProviderName,
 			GroupsClaim:  oidcConfig.GroupsClaim,

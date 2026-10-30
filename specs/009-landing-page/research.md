@@ -97,7 +97,7 @@ are technology-selection and best-practice questions.
 
 ## Resolved inputs from the specification
 
-- Landing page is public (no authentication) — contains only marketing copy.
+- Landing page requires a verified session (see spec assumptions; superseded the original "public" decision) — contains only marketing copy, but the index is gated like every protected route.
 - Tagline must render exactly: "a second brain, powered by markdown".
 - Page must remain available when optional subsystems or the vault are unavailable —
   guaranteed because the page is static and reads nothing at request time.

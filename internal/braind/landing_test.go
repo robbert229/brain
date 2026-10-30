@@ -35,7 +35,7 @@ func TestLandingPageCopy(t *testing.T) {
 	if got := recorder.Header().Get("Content-Type"); got != "text/html; charset=utf-8" {
 		t.Errorf("unexpected Content-Type: %q", got)
 	}
-	if got := recorder.Header().Get("Cache-Control"); got != "public, max-age=3600" {
+	if got := recorder.Header().Get("Cache-Control"); got != "private, max-age=3600" {
 		t.Errorf("unexpected Cache-Control: %q", got)
 	}
 	if got := recorder.Header().Get("Content-Security-Policy"); got != "default-src 'self'" {

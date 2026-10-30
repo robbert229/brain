@@ -14,3 +14,4 @@ behavior and acceptance criteria live in the feature specs under `specs/`.
 | [0007](0007-git-backup-is-one-way.md) | Git backup is separate and one-way | Accepted |
 | [0008](0008-private-single-replica-kubernetes.md) | Private single-replica Kubernetes deployment | Accepted |
 | [0009](0009-private-obsidian-headless-artifacts.md) | Keep Obsidian Headless artifacts private | Accepted |
+| [0010](0010-adopt-standard-oidc-libraries.md) | Use go-oidc and oauth2 for OIDC protocol mechanics | Accepted |

@@ -37,10 +37,12 @@ var landingTemplate = template.Must(template.ParseFS(webAssets, "webassets/index
 
 // serveLanding renders the landing page at the root address. The page is
 // entirely server-rendered, so it is complete when scripting is disabled
-// (FR-003). Headers follow contracts/http.md.
+// (FR-003). It is served only to verified sessions (run.go), so the cache
+// directive keeps the page out of shared caches. Headers follow
+// contracts/http.md.
 func serveLanding(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("Cache-Control", "private, max-age=3600")
 	w.Header().Set("Content-Security-Policy", "default-src 'self'")
 	if err := landingTemplate.Execute(w, landingContent{
 		ProductName:        productName,

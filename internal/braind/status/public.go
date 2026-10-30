@@ -22,7 +22,6 @@ type PublicVault struct {
 }
 
 type PublicOIDC struct {
-	Enabled        bool               `json:"enabled"`
 	Discovery      OIDCDiscoveryState `json:"discovery"`
 	Issuer         string             `json:"issuer,omitempty"`
 	ClientID       string             `json:"client_id,omitempty"`
@@ -104,7 +103,6 @@ func (s Snapshot) Public(now time.Time) PublicSnapshot {
 			ReadOnly: s.Vault.ReadOnly,
 		},
 		OIDC: PublicOIDC{
-			Enabled:        s.OIDC.Enabled,
 			Discovery:      s.OIDC.Discovery,
 			Issuer:         s.OIDC.Issuer,
 			ClientID:       s.OIDC.ClientID,

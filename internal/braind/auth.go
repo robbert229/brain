@@ -1,9 +1,10 @@
 package braind
 
-// Authentication wiring for the daemon HTTP surface (spec 002). The sign-in
-// handlers are registered only when OIDC is enabled; probes, status, static
-// assets, and the landing page stay public because Kubernetes and operators
-// must reach them without an identity provider round trip (ADR-0003).
+// Authentication wiring for the daemon HTTP surface (spec 002). OIDC is
+// mandatory: run() refuses to start without a usable sign-in surface. Probes,
+// status, and static assets stay public because Kubernetes and operators must
+// reach them without an identity provider round trip (ADR-0003). The landing
+// page requires a verified session; run.go mounts it through RequireAuth.
 
 import (
 	"context"
@@ -34,14 +35,11 @@ type authSurface struct {
 	closeOnce sync.Once
 }
 
-// newAuthSurface builds the sign-in surface, returning nil when OIDC is
-// disabled. Configuration the auth package rejects is reported as an error so
-// run() can serve the public surface instead of failing to start.
+// newAuthSurface builds the sign-in surface. OIDC is always on, so the only
+// failure mode is configuration the auth package rejects; run() treats that as
+// fatal so protected routes are never served without authentication.
 func newAuthSurface(processConfig config.Config, logger *slog.Logger) (*authSurface, error) {
 	oidc := processConfig.OIDC()
-	if !oidc.Enabled {
-		return nil, nil
-	}
 	sessionPolicy := processConfig.Session()
 	baseURL := strings.TrimRight(processConfig.Server().ExternalURL, "/")
 	provider, err := auth.NewProvider(auth.ProviderConfig{
@@ -105,8 +103,8 @@ func requestedScopes(extra []string) []string {
 
 // register mounts the sign-in surface. The anonymous entry points and the
 // policy-gated routes are registered separately so spec 003+ can add protected
-// vault and API routes through Handler.RequireAuth without touching probes,
-// status, or the landing page.
+// vault and API routes through Handler.RequireAuth without touching probes or
+// status. The landing page is gated by run.go through the same RequireAuth.
 func (s *authSurface) register(mux *http.ServeMux) {
 	if s == nil {
 		return

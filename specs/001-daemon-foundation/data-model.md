@@ -65,7 +65,7 @@ clones and sanitizes against configured secret values.
 | `Build` | `Version`, `Commit` (delta: actually populated, D6), `StartedAt` | plus computed `uptime_seconds` in the public view |
 | `Lifecycle` | mirrors lifecycle Snapshot | exposed as `lifecycle` in JSON |
 | `Vault` | `State`, `ReadOnly` | `scanning` (initial) → `ready` \| `read-only` \| `degraded` \| `unavailable` |
-| `OIDC` | discovery + group-config names, `ActiveSessions` | `disabled`/`pending`/`ready`/`degraded`; secret fields structurally absent |
+| `OIDC` | discovery + group-config names, `ActiveSessions` | `pending`/`ready`/`degraded`; secret fields structurally absent |
 | `Search` | last run stats | optional; zero until first run (edge case "not yet populated") |
 | `Sync` | state machine `disabled`/`checking`/`needs-authentication`/`needs-setup`/`starting`/`running`/`backoff`/`stopped`, `LastError`/`OutputTail` (sanitized) | optional subsystem |
 | `Backup` | `disabled`/`checking`/`ready`/`running`/`backoff`/`blocked`/`degraded`, commit/push times, `LastError` (sanitized) | optional subsystem |

@@ -36,8 +36,11 @@ Full suite: `go test ./...` and `go vet ./...` must both pass.
 ```bash
 export BRAIND_LISTEN_ADDR=127.0.0.1:8787
 export BRAIND_DATA_PATH="$(mktemp -d)/data"
-export BRAIND_VAULT_PATH="$(mktemp -d)/vault"
-export BRAIND_OIDC_ENABLED=false
+export BRAIND_VAULT_PATH="$BRAIND_DATA_PATH/vault"
+export BRAIND_GIT_DIR="$BRAIND_DATA_PATH/git/vault.git"
+export OIDC_CONFIGURATION_URL=https://oidc.example.test/.well-known/openid-configuration
+export OIDC_CLIENT_ID=braind OIDC_CLIENT_SECRET=placeholder-secret
+export OIDC_ADMIN_GROUP=access-brain-admin OIDC_USER_GROUP=access-brain-user OIDC_VIEWER_GROUP=access-brain-viewer
 export BRAIND_GIT_BACKUP_ENABLED=false
 go run ./cmd/braind
 ```
@@ -50,7 +53,7 @@ go run ./cmd/braind
 With the daemon on `127.0.0.1:8787`:
 
 ```bash
-curl -i http://127.0.0.1:8787/                 # 200, text/html, has the copy
+curl -i http://127.0.0.1:8787/                 # 302 to /login?next=%2F (session required)
 curl -i http://127.0.0.1:8787/static/htmx.min.js   # 200, text/javascript
 curl -i http://127.0.0.1:8787/static/style.css     # 200, text/css
 curl -i http://127.0.0.1:8787/healthz              # 200 "ok" (regression)
@@ -59,12 +62,16 @@ curl -i http://127.0.0.1:8787/readyz               # 404
 ```
 
 **Expected**: status codes and content types per [contracts/http.md](./contracts/http.md);
-the tagline appears exactly as `a second brain, powered by markdown`.
+the tagline appears exactly as `a second brain, powered by markdown`. The index page is
+session-gated (spec 002): the checks below need a signed-in session — with a real
+provider, complete sign-in in the browser and use *View Source*, or replay the request
+with the `braind_session` cookie copied from DevTools:
+`curl -s -b 'braind_session=<value>' http://127.0.0.1:8787/`.
 
 ## 4. No-script check
 
 ```bash
-curl -s http://127.0.0.1:8787/ | grep -c "second brain, powered by markdown"
+curl -s -b 'braind_session=<value>' http://127.0.0.1:8787/ | grep -c "second brain, powered by markdown"
 ```
 
 The content is in the initial response, so disabling JavaScript in a browser (or using
@@ -73,8 +80,8 @@ complete with scripting disabled (SC-003).
 
 ## 5. Responsive/design check
 
-Open `http://127.0.0.1:8787/` in a browser and use DevTools device emulation at
-**320 px, 768 px, 1024 px, and 1920 px** widths.
+Sign in at `http://127.0.0.1:8787/` (with a real provider configured), then use DevTools
+device emulation at **320 px, 768 px, 1024 px, and 1920 px** widths.
 
 **Expected**: no horizontal scrolling, no overlapping or clipped content; product name,
 tagline, and under-construction notice visible at every width (SC-002).
@@ -82,7 +89,7 @@ tagline, and under-construction notice visible at every width (SC-002).
 ## 6. Sensitive-content scan
 
 ```bash
-curl -s http://127.0.0.1:8787/ | grep -Ei 'secret|token|vault/|/notes/|client_secret|BEGIN ' || true
+curl -s -b 'braind_session=<value>' http://127.0.0.1:8787/ | grep -Ei 'secret|token|vault/|/notes/|client_secret|BEGIN ' || true
 ```
 
 **Expected**: no matches (SC-005). The page is static marketing copy only.

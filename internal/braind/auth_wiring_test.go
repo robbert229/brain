@@ -19,10 +19,10 @@ import (
 	"github.com/johnrowl/brain/internal/braind/status"
 )
 
-// TestAuthRoutesAreAbsentWhenOIDCDisabled keeps the 001 contract: with no
-// identity provider configured the daemon exposes the same surface it always
-// did, so a missing sign-in page is not a new route to probe.
-func TestAuthRoutesAreAbsentWhenOIDCDisabled(t *testing.T) {
+// TestUnwiredHandlerOmitsSignInRoutes keeps the 001 bootstrap contract: the
+// exported unoperational Handler() has no auth surface wired, so a missing
+// sign-in page is not a new route to probe. run() always wires OIDC.
+func TestUnwiredHandlerOmitsSignInRoutes(t *testing.T) {
 	handler := newHandler(handlerState{})
 	for _, route := range []struct {
 		method string
@@ -35,12 +35,12 @@ func TestAuthRoutesAreAbsentWhenOIDCDisabled(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(route.method, route.path, nil))
 		if recorder.Code != http.StatusNotFound {
-			t.Fatalf("%s %s = %d, want 404 when OIDC is disabled", route.method, route.path, recorder.Code)
+			t.Fatalf("%s %s = %d, want 404 when no auth surface is wired", route.method, route.path, recorder.Code)
 		}
 	}
 }
 
-func TestAuthRoutesServeProviderWhenOIDCEnabled(t *testing.T) {
+func TestAuthRoutesServeProvider(t *testing.T) {
 	simulator := authtest.New(t)
 	surface := enableOIDC(t, simulator)
 	handler := newHandler(handlerState{auth: surface})
@@ -151,7 +151,7 @@ func TestProtectedRoutesApplyPolicyAtTheDaemon(t *testing.T) {
 func TestAuthSurfaceWatchPublishesDiscoveryState(t *testing.T) {
 	simulator := authtest.New(t)
 	surface := enableOIDC(t, simulator)
-	store := status.New(status.Snapshot{OIDC: status.OIDC{Enabled: true, Discovery: status.OIDCPending}}, authtest.ClientSecret, "")
+	store := status.New(status.Snapshot{OIDC: status.OIDC{Discovery: status.OIDCPending}}, authtest.ClientSecret, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -183,7 +183,7 @@ func TestAuthSurfaceWatchPublishesDiscoveryState(t *testing.T) {
 func TestStatusReportsActiveSessionsAfterSignIn(t *testing.T) {
 	simulator := authtest.New(t)
 	surface := enableOIDC(t, simulator)
-	store := status.New(status.Snapshot{OIDC: status.OIDC{Enabled: true, Discovery: status.OIDCPending}}, authtest.ClientSecret, "")
+	store := status.New(status.Snapshot{OIDC: status.OIDC{Discovery: status.OIDCPending}}, authtest.ClientSecret, "")
 	handler := newHandler(handlerState{auth: surface, statusStore: store})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -193,31 +193,7 @@ func TestStatusReportsActiveSessionsAfterSignIn(t *testing.T) {
 
 	// A browser follows the single link the sign-in page offers, the provider
 	// sends it back with a code, and the callback hands it a session cookie.
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/login", nil))
-	match := daemonAuthorizeLink.FindStringSubmatch(recorder.Body.String())
-	if match == nil {
-		t.Fatalf("prompt has no sign-in link: %s", recorder.Body.String())
-	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	authorizeResponse, err := client.Get(strings.ReplaceAll(match[1], "&amp;", "&"))
-	if err != nil {
-		t.Fatalf("authorize request: %v", err)
-	}
-	defer authorizeResponse.Body.Close()
-	if authorizeResponse.StatusCode != http.StatusFound {
-		t.Fatalf("authorize status = %d", authorizeResponse.StatusCode)
-	}
-
-	recorder = httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, authorizeResponse.Header.Get("Location"), nil))
-	if recorder.Code != http.StatusFound {
-		t.Fatalf("callback = %d, want 302 body=%s", recorder.Code, recorder.Body.String())
-	}
-	sessionCookie, found := sessionCookie(recorder)
-	if !found {
-		t.Fatalf("callback set no session cookie: %+v", recorder.Result().Cookies())
-	}
+	sessionCookie := signIntoDaemon(t, handler)
 
 	if sessions := activeSessions(t, handler, surface, store); sessions != 1 {
 		t.Fatalf("active_sessions = %d after one sign-in, want 1", sessions)
@@ -228,7 +204,7 @@ func TestStatusReportsActiveSessionsAfterSignIn(t *testing.T) {
 	if outcome != auth.OutcomeActive {
 		t.Fatalf("session after callback = %s, want active", outcome)
 	}
-	recorder = httptest.NewRecorder()
+	recorder := httptest.NewRecorder()
 	logout := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	logout.Header.Set(auth.CSRFHeader, session.CSRFToken)
 	logout.Header.Set("Accept", "application/json")
@@ -291,6 +267,81 @@ func waitForDiscovery(t *testing.T, store *status.Store, want status.OIDCDiscove
 	t.Fatalf("discovery state = %q, want %q", store.Load().OIDC.Discovery, want)
 }
 
+// TestLandingPageRequiresSession pins the policy that the index page shares
+// the same authentication decision as every other protected route: an
+// anonymous browser is routed to sign-in carrying where it wanted to go, an
+// API client gets the JSON outcome, and a verified session is served the page.
+func TestLandingPageRequiresSession(t *testing.T) {
+	simulator := authtest.New(t)
+	surface := enableOIDC(t, simulator)
+	handler := newHandler(handlerState{auth: surface})
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("anonymous GET / = %d, want 302", recorder.Code)
+	}
+	if location := recorder.Header().Get("Location"); location != "/login?next=%2F" {
+		t.Fatalf("anonymous GET / redirected to %q, want sign-in with next=/", location)
+	}
+
+	recorder = httptest.NewRecorder()
+	apiRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	apiRequest.Header.Set("Accept", "application/json")
+	handler.ServeHTTP(recorder, apiRequest)
+	if recorder.Code != http.StatusUnauthorized || !strings.Contains(recorder.Body.String(), "unauthenticated") {
+		t.Fatalf("API GET / = %d %s, want 401 unauthenticated", recorder.Code, recorder.Body.String())
+	}
+
+	sessionCookie := signIntoDaemon(t, handler)
+	recorder = httptest.NewRecorder()
+	page := httptest.NewRequest(http.MethodGet, "/", nil)
+	page.AddCookie(sessionCookie)
+	handler.ServeHTTP(recorder, page)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("authenticated GET / = %d, want 200", recorder.Code)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, "a second brain, powered by markdown") {
+		t.Fatalf("authenticated landing page is missing the tagline: %s", body)
+	}
+	// A session-gated page must not be retained by shared caches.
+	if cache := recorder.Header().Get("Cache-Control"); cache != "private, max-age=3600" {
+		t.Fatalf("landing Cache-Control = %q, want private, max-age=3600", cache)
+	}
+}
+
+// signIntoDaemon walks the browser path once — sign-in prompt, provider
+// authorize redirect, callback — and returns the session cookie the daemon
+// issued.
+func signIntoDaemon(t *testing.T, handler http.Handler) *http.Cookie {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/login", nil))
+	match := daemonAuthorizeLink.FindStringSubmatch(recorder.Body.String())
+	if match == nil {
+		t.Fatalf("prompt has no sign-in link: %s", recorder.Body.String())
+	}
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	authorizeResponse, err := client.Get(strings.ReplaceAll(match[1], "&amp;", "&"))
+	if err != nil {
+		t.Fatalf("authorize request: %v", err)
+	}
+	defer authorizeResponse.Body.Close()
+	if authorizeResponse.StatusCode != http.StatusFound {
+		t.Fatalf("authorize status = %d", authorizeResponse.StatusCode)
+	}
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, authorizeResponse.Header.Get("Location"), nil))
+	if recorder.Code != http.StatusFound {
+		t.Fatalf("callback = %d, want 302 body=%s", recorder.Code, recorder.Body.String())
+	}
+	cookie, found := sessionCookie(recorder)
+	if !found {
+		t.Fatalf("callback set no session cookie: %+v", recorder.Result().Cookies())
+	}
+	return cookie
+}
+
 func sessionCookie(recorder *httptest.ResponseRecorder) (*http.Cookie, bool) {
 	for _, cookie := range recorder.Result().Cookies() {
 		if cookie.Name == auth.CookieName {
@@ -316,7 +367,6 @@ func enableOIDC(t *testing.T, simulator *authtest.Provider) *authSurface {
 		config.EnvDataPath:             root,
 		config.EnvVaultPath:            root + "/vault",
 		config.EnvGitDir:               root + "/git/vault.git",
-		config.EnvOIDCEnabled:          "true",
 		config.EnvOIDCConfigurationURL: simulator.URL(),
 		config.EnvOIDCClientID:         authtest.ClientID,
 		config.EnvOIDCClientSecret:     authtest.ClientSecret,
@@ -331,7 +381,7 @@ func enableOIDC(t *testing.T, simulator *authtest.Provider) *authSurface {
 	}
 	processConfig, err := config.Load(mapLookup(environment))
 	if err != nil {
-		t.Fatalf("load oidc-enabled configuration: %v", err)
+		t.Fatalf("load oidc configuration: %v", err)
 	}
 	logger, err := logging.New(io.Discard, io.Discard, "error", authtest.ClientSecret)
 	if err != nil {
@@ -340,9 +390,6 @@ func enableOIDC(t *testing.T, simulator *authtest.Provider) *authSurface {
 	surface, err := newAuthSurface(processConfig, logger)
 	if err != nil {
 		t.Fatalf("create auth surface: %v", err)
-	}
-	if surface == nil {
-		t.Fatal("expected an auth surface for an enabled provider")
 	}
 	t.Cleanup(surface.Close)
 	return surface

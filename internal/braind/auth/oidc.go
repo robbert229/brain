@@ -2,28 +2,33 @@ package auth
 
 import (
 	"context"
-	"crypto"
-	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
 )
+
+// Protocol mechanics live in coreos/go-oidc and golang.org/x/oauth2
+// (ADR-0010): discovery validation, JWKS fetch and rotation, signature
+// verification, standard-claim checks, PKCE, and token exchange. What remains
+// here is braind-specific: health bookkeeping for the status snapshot (FR-013),
+// the endpoint-origin hardening beyond library defaults, and the coarse error
+// vocabulary that keeps token material out of logs (FR-009).
 
 // DiscoveryState is the operator-visible view of provider availability.
 type DiscoveryState string
 
 const (
-	DiscoveryDisabled DiscoveryState = "disabled"
 	DiscoveryPending  DiscoveryState = "pending"
 	DiscoveryReady    DiscoveryState = "ready"
 	DiscoveryDegraded DiscoveryState = "degraded"
@@ -37,10 +42,6 @@ const (
 	HealthHealthy  HealthState = "healthy"
 	HealthDegraded HealthState = "degraded"
 )
-
-// Disabled is reported by the status snapshot, not by a live provider, so
-// HealthState has no disabled member: an unconfigured provider has no surface
-// at all (contracts/http.md).
 
 // ProviderConfig configures one OIDC provider (the only supported configuration,
 // per ADR-0005).
@@ -64,17 +65,19 @@ type TokenSet struct {
 // exchange. Tokens and claims are held in memory only, never logged (FR-003).
 type Provider struct {
 	config ProviderConfig
+	issuer string
 
 	mu         sync.Mutex
-	issuer     string
 	endpoints  discoveryDocument
-	keys       []jwk
+	oidc       *oidc.Provider
+	verifier   *oidc.IDTokenVerifier
 	state      DiscoveryState
 	lastHealth time.Time
-
-	jwksURI string
 }
 
+// discoveryDocument keeps the fields the library does not expose or that
+// braind hardens beyond library defaults: end_session_endpoint for sign-out
+// (US1-AC3), PKCE and flow advertisement, and endpoint-origin validation.
 type discoveryDocument struct {
 	Issuer                        string   `json:"issuer"`
 	AuthorizationEndpoint         string   `json:"authorization_endpoint"`
@@ -84,19 +87,6 @@ type discoveryDocument struct {
 	EndSessionEndpoint            string   `json:"end_session_endpoint"`
 	ResponseTypesSupported        []string `json:"response_types_supported"`
 	CodeChallengeMethodsSupported []string `json:"code_challenge_methods_supported"`
-}
-
-type jwksDocument struct {
-	Keys []jwk `json:"keys"`
-}
-
-type jwk struct {
-	KTY string `json:"kty"`
-	Use string `json:"use"`
-	KID string `json:"kid"`
-	Alg string `json:"alg"`
-	N   string `json:"n"`
-	E   string `json:"e"`
 }
 
 // NewProvider validates configuration shape without contacting the provider, so
@@ -125,10 +115,20 @@ func NewProvider(config ProviderConfig) (*Provider, error) {
 	}, nil
 }
 
-// Refresh fetches discovery and signing keys. It records the outcome and returns
-// the error: callers on request paths MUST treat failure as degraded, never as
-// fatal, and readiness MUST NOT consult it (FR-013, ADR-0003).
+// Refresh fetches discovery through go-oidc and confirms the signing keys are
+// reachable. It records the outcome and returns the error: callers on request
+// paths MUST treat failure as degraded, never as fatal, and readiness MUST NOT
+// consult it (FR-013, ADR-0003). The next successful call replaces the
+// verifier, which is what makes provider key rotation survivable.
 func (p *Provider) Refresh(ctx context.Context) error {
+	providerCtx := oidc.ClientContext(ctx, p.config.HTTPClient)
+	// go-oidc performs discovery and enforces issuer equality; a failure here
+	// means the provider cannot be trusted, so nothing is swapped in.
+	rp, err := oidc.NewProvider(providerCtx, p.issuer)
+	if err != nil {
+		p.mark(errors.New("discovery failed"))
+		return errors.New("oidc: discovery request failed")
+	}
 	document, err := p.fetchDiscovery(ctx)
 	if err != nil {
 		p.mark(err)
@@ -138,13 +138,14 @@ func (p *Provider) Refresh(ctx context.Context) error {
 		p.mark(err)
 		return err
 	}
-	if err := p.fetchKeys(ctx, document.JWKSURI); err != nil {
+	if err := p.checkKeysReachable(ctx, document.JWKSURI); err != nil {
 		p.mark(err)
 		return err
 	}
 	p.mu.Lock()
 	p.endpoints = document
-	p.jwksURI = document.JWKSURI
+	p.oidc = rp
+	p.verifier = rp.Verifier(&oidc.Config{ClientID: p.config.ClientID, Now: p.config.Now})
 	p.state = DiscoveryReady
 	p.lastHealth = p.config.Now()
 	p.mu.Unlock()
@@ -184,11 +185,11 @@ func (p *Provider) Issuer() string {
 	return p.issuer
 }
 
-// AuthorizeURL builds the provider authorization request using S256 PKCE. When
-// the last provider round trip failed it makes one discovery attempt so a
-// recovered provider is usable again without a background poller; a still-failing
-// provider returns an error, which the handler reports as
-// authentication_unavailable (FR-012, FR-013).
+// AuthorizeURL builds the provider authorization request using S256 PKCE
+// through golang.org/x/oauth2. When the last provider round trip failed it
+// makes one discovery attempt so a recovered provider is usable again without a
+// background poller; a still-failing provider returns an error, which the
+// handler reports as authentication_unavailable (FR-012, FR-013).
 func (p *Provider) AuthorizeURL(ctx context.Context, state, nonce, verifier string, scopes []string) (string, error) {
 	if !p.Healthy() {
 		if err := p.Refresh(ctx); err != nil {
@@ -210,29 +211,25 @@ func (p *Provider) AuthorizeURL(ctx context.Context, state, nonce, verifier stri
 	if len(scopes) == 0 {
 		scopes = []string{"openid", "profile", "email", "groups"}
 	}
-	values := url.Values{
-		"response_type":         []string{"code"},
-		"client_id":             []string{p.config.ClientID},
-		"redirect_uri":          []string{p.config.RedirectURL},
-		"state":                 []string{state},
-		"nonce":                 []string{nonce},
-		"code_challenge":        []string{ChallengeFromVerifier(verifier)},
-		"code_challenge_method": []string{"S256"},
-	}
-	endpoint, err := url.Parse(endpoints.AuthorizationEndpoint)
+	config := p.oauth2Config(endpoints)
+	// Without Scopes on the config, AuthCodeURL omits the scope parameter, the
+	// provider issues a non-openid code, and the token response carries no
+	// id_token at all. The config is rebuilt per call, so this is local.
+	config.Scopes = scopes
+	authorizeURL := config.AuthCodeURL(state,
+		oauth2.SetAuthURLParam("nonce", nonce),
+		oauth2.S256ChallengeOption(verifier),
+	)
+	// Values.Encode writes spaces as '+', which the prompt page escapes into
+	// the HTML entity form and any URL parser then reads as a fragment start.
+	// The scope list is space-separated (RFC 6749), so write its separators as
+	// %20. Every other query value here is base64url and carries no '+'.
+	parsed, err := url.Parse(authorizeURL)
 	if err != nil {
 		return "", fmt.Errorf("oidc: authorization endpoint: %w", err)
 	}
-	rawQuery := values.Encode()
-	// url.Values.Encode writes spaces as '+', which the prompt page escapes into
-	// the HTML entity form and any URL parser then reads as a fragment start. The
-	// scope list is space-separated (RFC 6749), so write its separators as %20.
-	if len(rawQuery) > 0 {
-		rawQuery += "&"
-	}
-	rawQuery += "scope=" + strings.ReplaceAll(url.QueryEscape(strings.Join(scopes, " ")), "+", "%20")
-	endpoint.RawQuery = rawQuery
-	return endpoint.String(), nil
+	parsed.RawQuery = strings.ReplaceAll(parsed.RawQuery, "+", "%20")
+	return parsed.String(), nil
 }
 
 // EndSessionURL returns the provider logout endpoint when discovery advertised
@@ -250,83 +247,54 @@ func (p *Provider) EndSessionURL() (string, bool) {
 // Signature, issuer, audience, expiry, and nonce are all enforced here (FR-002).
 func (p *Provider) Exchange(ctx context.Context, code, verifier, nonce string) (*TokenSet, error) {
 	p.mu.Lock()
-	tokenEndpoint := p.endpoints.TokenEndpoint
+	endpoints := p.endpoints
 	p.mu.Unlock()
-	if tokenEndpoint == "" {
+	if endpoints.TokenEndpoint == "" {
 		return nil, errors.New("oidc: provider discovery is unavailable")
 	}
-	form := url.Values{
-		"grant_type":    []string{"authorization_code"},
-		"code":          []string{code},
-		"redirect_uri":  []string{p.config.RedirectURL},
-		"code_verifier": []string{verifier},
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(form.Encode()))
+	config := p.oauth2Config(endpoints)
+	token, err := config.Exchange(oidc.ClientContext(ctx, p.config.HTTPClient), code, oauth2.VerifierOption(verifier))
 	if err != nil {
-		return nil, err
-	}
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Accept", "application/json")
-	request.SetBasicAuth(p.config.ClientID, p.config.ClientSecret)
-	response, err := p.config.HTTPClient.Do(request)
-	if err != nil {
-		p.mark(err)
-		return nil, errors.New("oidc: token exchange request failed")
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
+		// The library error can echo provider response text; surface only the
+		// safe shape of it (status plus registered OAuth error code, FR-009).
 		p.mark(errors.New("token endpoint error"))
-		return nil, fmt.Errorf("oidc: token endpoint returned HTTP %d", response.StatusCode)
+		return nil, exchangeFailure(err)
 	}
-	var payload struct {
-		AccessToken string `json:"access_token"`
-		IDToken     string `json:"id_token"`
-		TokenType   string `json:"token_type"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&payload); err != nil {
-		p.mark(err)
-		return nil, errors.New("oidc: malformed token response")
-	}
-	if payload.IDToken == "" {
+	rawIDToken, _ := token.Extra("id_token").(string)
+	if rawIDToken == "" {
 		p.mark(errors.New("missing id_token"))
-		return nil, errors.New("oidc: provider returned no ID token")
+		return nil, fmt.Errorf("oidc: provider returned no ID token (access_token=%v refresh_token=%v)", token.AccessToken != "", token.RefreshToken != "")
 	}
-	claims, err := p.VerifyIDToken(ctx, payload.IDToken, nonce)
+	claims, err := p.VerifyIDToken(ctx, rawIDToken, nonce)
 	if err != nil {
 		return nil, err
 	}
 	p.mark(nil)
-	return &TokenSet{AccessToken: payload.AccessToken, Claims: claims}, nil
+	return &TokenSet{AccessToken: token.AccessToken, Claims: claims}, nil
 }
 
 // Userinfo fetches the userinfo document with a bearer access token, used when
 // OIDC_GROUPS_SOURCE=userinfo (FR-004).
 func (p *Provider) Userinfo(ctx context.Context, accessToken string) (map[string]any, error) {
 	p.mu.Lock()
+	rp := p.oidc
 	endpoint := p.endpoints.UserinfoEndpoint
 	p.mu.Unlock()
 	if endpoint == "" {
 		return nil, errors.New("oidc: provider has no userinfo endpoint")
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return nil, err
+	if rp == nil {
+		return nil, errors.New("oidc: discovery is not loaded")
 	}
-	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Authorization", "Bearer "+accessToken)
-	response, err := p.config.HTTPClient.Do(request)
+	source := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken})
+	userInfo, err := rp.UserInfo(oidc.ClientContext(ctx, p.config.HTTPClient), source)
 	if err != nil {
-		p.mark(err)
+		p.mark(errors.New("userinfo error"))
 		return nil, errors.New("oidc: userinfo request failed")
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		p.mark(errors.New("userinfo error"))
-		return nil, fmt.Errorf("oidc: userinfo endpoint returned HTTP %d", response.StatusCode)
-	}
 	var claims map[string]any
-	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&claims); err != nil {
-		p.mark(err)
+	if err := userInfo.Claims(&claims); err != nil {
+		p.mark(errors.New("malformed userinfo response"))
 		return nil, errors.New("oidc: malformed userinfo response")
 	}
 	p.mark(nil)
@@ -334,175 +302,109 @@ func (p *Provider) Userinfo(ctx context.Context, accessToken string) (map[string
 }
 
 // VerifyIDToken enforces every claim check that must pass before a session is
-// created (FR-002). Error text names the violated rule but never echoes token
+// created (FR-002). go-oidc verifies the signature against the discovered JWKS
+// (refreshing once for an unknown kid) and checks issuer, audience, expiry,
+// and issue time; nonce comparison stays ours because the library leaves it
+// to the caller. Error text names the violated rule but never echoes token
 // material (FR-009).
 func (p *Provider) VerifyIDToken(ctx context.Context, token, nonce string) (map[string]any, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil, errors.New("oidc: id token is not a three-part JWT")
+	p.mu.Lock()
+	verifier := p.verifier
+	p.mu.Unlock()
+	if verifier == nil {
+		return nil, errors.New("oidc: discovery is not loaded")
 	}
-	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	idToken, err := verifier.Verify(oidc.ClientContext(ctx, p.config.HTTPClient), token)
 	if err != nil {
-		return nil, errors.New("oidc: id token header is not base64url")
+		return nil, fmt.Errorf("oidc: id token rejected: %s", redactedError(err))
 	}
-	var header struct {
-		Algorithm string `json:"alg"`
-		KeyID     string `json:"kid"`
-	}
-	if err := json.Unmarshal(headerBytes, &header); err != nil {
-		return nil, errors.New("oidc: id token header is not JSON")
-	}
-	if header.Algorithm != "RS256" || header.KeyID == "" {
-		return nil, fmt.Errorf("oidc: unsupported id token algorithm %q", header.Algorithm)
-	}
-	key, err := p.signingKey(ctx, header.KeyID)
-	if err != nil {
-		return nil, err
-	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return nil, errors.New("oidc: id token signature is not base64url")
-	}
-	digest := sha256.Sum256([]byte(parts[0] + "." + parts[1]))
-	if err := rsa.VerifyPKCS1v15(key, crypto.SHA256, digest[:], signature); err != nil {
-		return nil, errors.New("oidc: id token signature is invalid")
-	}
-	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, errors.New("oidc: id token payload is not base64url")
+	if idToken.Nonce != nonce {
+		return nil, errors.New("oidc: id token nonce mismatch")
 	}
 	var claims map[string]any
-	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+	if err := idToken.Claims(&claims); err != nil {
 		return nil, errors.New("oidc: id token payload is not JSON")
 	}
-	if err := p.validateClaims(claims, nonce); err != nil {
-		return nil, err
+	subject, ok := claims["sub"].(string)
+	if !ok || subject == "" {
+		return nil, errors.New("oidc: id token has no subject")
 	}
 	return claims, nil
 }
 
-// ChallengeFromVerifier derives the S256 code challenge from a verifier.
+// ChallengeFromVerifier derives the S256 code challenge from a verifier. The
+// OAuth2 library derives it internally for authorize requests; this export
+// exists so tests can build provider authorize URLs directly.
 func ChallengeFromVerifier(verifier string) string {
 	digest := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
-func (p *Provider) validateClaims(claims map[string]any, nonce string) error {
-	p.mu.Lock()
-	issuer := p.issuer
-	p.mu.Unlock()
-	if claims["iss"] != issuer {
-		return errors.New("oidc: id token issuer mismatch")
+func (p *Provider) oauth2Config(endpoints discoveryDocument) *oauth2.Config {
+	return &oauth2.Config{
+		ClientID:     p.config.ClientID,
+		ClientSecret: p.config.ClientSecret,
+		RedirectURL:  p.config.RedirectURL,
+		Endpoint: oauth2.Endpoint{
+			AuthURL:   endpoints.AuthorizationEndpoint,
+			TokenURL:  endpoints.TokenEndpoint,
+			AuthStyle: oauth2.AuthStyleInHeader,
+		},
 	}
-	if !audienceContains(claims["aud"], p.config.ClientID) {
-		return errors.New("oidc: id token audience mismatch")
-	}
-	if claims["nonce"] != nonce {
-		return errors.New("oidc: id token nonce mismatch")
-	}
-	expires, ok := claims["exp"].(float64)
-	if !ok || p.config.Now().Unix() >= int64(expires) {
-		return errors.New("oidc: id token is expired or missing exp")
-	}
-	if issued, ok := claims["iat"].(float64); ok && int64(issued) > p.config.Now().Unix()+60 {
-		return errors.New("oidc: id token issued in the future")
-	}
-	subject, ok := claims["sub"].(string)
-	if !ok || subject == "" {
-		return errors.New("oidc: id token has no subject")
-	}
-	return nil
 }
 
-func (p *Provider) signingKey(ctx context.Context, keyID string) (*rsa.PublicKey, error) {
-	keys, err := p.keySet(ctx)
-	if err != nil {
-		return nil, err
+// exchangeFailure maps an x/oauth2 exchange error onto the coarse, token-free
+// vocabulary logs may carry (FR-009). The library pre-parses the registered
+// OAuth error code — safe even when an unorthodox provider answers an error
+// with HTTP 200 — while the raw response body, which can carry token
+// material, is never copied into the message.
+func exchangeFailure(err error) error {
+	var retrieve *oauth2.RetrieveError
+	if errors.As(err, &retrieve) {
+		status := 0
+		if retrieve.Response != nil {
+			status = retrieve.Response.StatusCode
+		}
+		if code := sanitizeErrorCode(retrieve.ErrorCode); code != "" {
+			return fmt.Errorf("oidc: token endpoint returned HTTP %d (%s)", status, code)
+		}
+		return fmt.Errorf("oidc: token endpoint returned HTTP %d", status)
 	}
-	if key, ok := findRSAKey(keys, keyID); ok {
-		return key, nil
+	if strings.Contains(err.Error(), "missing access_token") {
+		return errors.New("oidc: token endpoint answered without an access token")
 	}
-	// Unknown kid: one refresh covers key rotation during a live session.
-	if err := p.refreshKeys(ctx); err != nil {
-		return nil, err
-	}
-	if key, ok := findRSAKey(p.cachedKeys(), keyID); ok {
-		return key, nil
-	}
-	return nil, errors.New("oidc: no signing key matches the id token")
+	return errors.New("oidc: token exchange failed")
 }
 
-func findRSAKey(keys []jwk, keyID string) (*rsa.PublicKey, bool) {
-	for _, candidate := range keys {
-		if candidate.KID != keyID || candidate.KTY != "RSA" {
+// sanitizeErrorCode keeps the OAuth error field only in its registered wire
+// form: RFC 6749 names are alphanumeric plus underscore. Anything else is
+// treated as provider free text and dropped.
+func sanitizeErrorCode(value string) string {
+	if value == "" || len(value) > 40 {
+		return ""
+	}
+	for _, r := range value {
+		if r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
 			continue
 		}
-		modulusBytes, err := base64.RawURLEncoding.DecodeString(candidate.N)
-		if err != nil {
-			return nil, false
-		}
-		exponentBytes, err := base64.RawURLEncoding.DecodeString(candidate.E)
-		if err != nil || len(exponentBytes) == 0 || len(exponentBytes) > 4 {
-			return nil, false
-		}
-		padded := make([]byte, 4)
-		copy(padded[4-len(exponentBytes):], exponentBytes)
-		exponent := int(binary.BigEndian.Uint32(padded))
-		if exponent < 3 {
-			return nil, false
-		}
-		return &rsa.PublicKey{N: new(big.Int).SetBytes(modulusBytes), E: exponent}, true
+		return ""
 	}
-	return nil, false
+	return value
 }
 
-func (p *Provider) keySet(ctx context.Context) ([]jwk, error) {
-	if keys := p.cachedKeys(); len(keys) > 0 {
-		return keys, nil
+// checkKeysReachable proves the JWKS endpoint answers with at least one key.
+// Actual key selection and caching belong to go-oidc.
+func (p *Provider) checkKeysReachable(ctx context.Context, uri string) error {
+	var document struct {
+		Keys []json.RawMessage `json:"keys"`
 	}
-	p.mu.Lock()
-	uri := p.jwksURI
-	p.mu.Unlock()
-	if uri == "" {
-		return nil, errors.New("oidc: discovery is not loaded")
-	}
-	if err := p.fetchKeys(ctx, uri); err != nil {
-		return nil, err
-	}
-	return p.cachedKeys(), nil
-}
-
-func (p *Provider) fetchKeys(ctx context.Context, uri string) error {
-	var document jwksDocument
 	if err := p.getJSON(ctx, uri, "", &document); err != nil {
 		return err
 	}
 	if len(document.Keys) == 0 {
 		return errors.New("oidc: jwks document contains no keys")
 	}
-	p.mu.Lock()
-	p.keys = document.Keys
-	p.jwksURI = uri
-	p.mu.Unlock()
 	return nil
-}
-
-// refreshKeys re-fetches keys from the known JWKS URI without touching
-// discovery, so an unknown kid recovers from provider key rotation.
-func (p *Provider) refreshKeys(ctx context.Context) error {
-	p.mu.Lock()
-	uri := p.jwksURI
-	p.mu.Unlock()
-	if uri == "" {
-		return errors.New("oidc: discovery is not loaded")
-	}
-	return p.fetchKeys(ctx, uri)
-}
-
-func (p *Provider) cachedKeys() []jwk {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return append([]jwk(nil), p.keys...)
 }
 
 func (p *Provider) fetchDiscovery(ctx context.Context) (discoveryDocument, error) {
@@ -619,20 +521,6 @@ func contains(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {
 			return true
-		}
-	}
-	return false
-}
-
-func audienceContains(value any, expected string) bool {
-	switch audience := value.(type) {
-	case string:
-		return audience == expected
-	case []any:
-		for _, item := range audience {
-			if item == expected {
-				return true
-			}
 		}
 	}
 	return false

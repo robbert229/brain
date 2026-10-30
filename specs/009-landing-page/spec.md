@@ -91,7 +91,7 @@ The visitor never sees private content on the landing page, and the page remains
 
 ## Assumptions
 
-- The landing page is reachable without authentication because it contains only public marketing copy and no private content.
+- The landing page requires a verified session: when the sign-in surface is wired, `GET /` is mounted through the same `RequireAuth` decision as every other protected route (spec 002), redirecting anonymous browsers to sign-in. (Original assumption "reachable without authentication because it contains only public marketing copy" superseded by the operator's direction to protect the index page; static assets and operational probes stay public.)
 - Per the user's explicit direction, the page is enhanced with HTMX and the HTMX assets are served by the main braind service itself (no external CDN), consistent with the project constitution (Go backend, server-rendered HTML enhanced with HTMX, no separate JavaScript application tier) and with private-deployment goals.
 - The tagline must appear exactly as provided by the user: "a second brain, powered by markdown".
 - The page content is static and does not read from the vault or any subsystem.

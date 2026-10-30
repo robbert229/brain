@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/johnrowl/brain/internal/braind/auth"
 	"github.com/johnrowl/brain/internal/braind/config"
 	"github.com/johnrowl/brain/internal/braind/datalock"
 	"github.com/johnrowl/brain/internal/braind/lifecycle"
@@ -80,14 +81,14 @@ func run(ctx context.Context, args []string, version, commit string, stdout, std
 	serverLogger := logger.With("component", "server")
 	authSurface, err := newAuthSurface(processConfig, logger)
 	if err != nil {
-		// Readiness never depends on the provider (FR-013), so an unusable OIDC
-		// setup degrades to the public surface instead of stopping the daemon.
+		// OIDC is mandatory: an unusable sign-in surface is fatal, because
+		// serving without it would expose protected routes anonymously.
+		// A provider that is merely unreachable stays non-fatal (FR-013);
+		// that path runs through the discovery watch, not here.
 		serverLogger.Error("authentication unavailable", "error", err)
-		authSurface = nil
+		return 1
 	}
-	if authSurface != nil {
-		defer authSurface.Close()
-	}
+	defer authSurface.Close()
 	processLifecycle := lifecycle.New()
 	statusStore := status.New(
 		status.Initial(version, commit, processConfig, processLifecycle.Snapshot(), startedAt),
@@ -124,9 +125,7 @@ func run(ctx context.Context, args []string, version, commit string, stdout, std
 		return changed
 	}
 	serverLogger.Info("server listening", "version", version, "address", listener.Addr().String())
-	if authSurface != nil {
-		go authSurface.watch(ctx, statusStore)
-	}
+	go authSurface.watch(ctx, statusStore)
 	serverHandler := newHandler(handlerState{
 		process:     processLifecycle,
 		vaultPath:   processConfig.Vault().VaultPath,
@@ -169,7 +168,7 @@ type handlerState struct {
 	process     *lifecycle.Lifecycle // process lifecycle, nil before lifecycle wiring
 	vaultPath   string               // local vault directory probed by readiness
 	statusStore *status.Store        // operational snapshot publisher, nil until wired
-	auth        *authSurface         // OIDC sign-in surface, nil when OIDC is disabled
+	auth        *authSurface         // OIDC sign-in surface, nil only for the unwired Handler() export
 }
 
 func newHandler(state handlerState) http.Handler {
@@ -206,11 +205,18 @@ func newHandler(state handlerState) http.Handler {
 		_ = encoder.Encode(status.Snapshot{})
 	})
 	// "GET /{$}" matches only the exact root path so unknown paths keep
-	// returning 404 (contracts/http.md; run_test.go rejection cases).
-	mux.HandleFunc("GET /{$}", serveLanding)
-	// Spec 002: the sign-in surface exists only when OIDC is configured. Probes,
-	// status, static assets, and the landing page stay registered above so they
-	// remain reachable without a provider round trip (ADR-0003).
+	// returning 404 (contracts/http.md; run_test.go rejection cases). The
+	// index page sits behind the shared authentication decision whenever the
+	// sign-in surface is wired; the unwired bootstrap export stays anonymous
+	// because it has no auth surface to consult.
+	var landing http.Handler = http.HandlerFunc(serveLanding)
+	if state.auth != nil {
+		landing = state.auth.handler.RequireAuth(auth.Policy{}, landing)
+	}
+	mux.Handle("GET /{$}", landing)
+	// Spec 002: the sign-in surface is mandatory and always registered in run().
+	// Probes, status, and static assets stay registered above so they remain
+	// reachable without a provider round trip (ADR-0003).
 	state.auth.register(mux)
 	return mux
 }

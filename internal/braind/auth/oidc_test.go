@@ -94,6 +94,31 @@ func TestAuthorizeURLRequiresS256(t *testing.T) {
 	}
 }
 
+// TestAuthorizeURLCarriesScope pins the regression where the computed scope
+// list never reached the request: without "scope=openid..." Pocket ID issued a
+// plain OAuth code and the token response carried no id_token.
+func TestAuthorizeURLCarriesScope(t *testing.T) {
+	_, provider := newProvider(t)
+	url, err := provider.AuthorizeURL(context.Background(), "state-1", "nonce-1", "verifier-value", nil)
+	if err != nil {
+		t.Fatalf("authorize url: %v", err)
+	}
+	if !strings.Contains(url, "scope=openid%20profile%20email%20groups") {
+		t.Fatalf("url lacks %%20-encoded default scope: %s", url)
+	}
+	if strings.Contains(url, "scope=openid+") {
+		t.Fatalf("scope separators must be %%20, got '+': %s", url)
+	}
+
+	custom, err := provider.AuthorizeURL(context.Background(), "state-2", "nonce-2", "verifier-value", []string{"openid", "email"})
+	if err != nil {
+		t.Fatalf("authorize url with custom scopes: %v", err)
+	}
+	if !strings.Contains(custom, "scope=openid%20email") {
+		t.Fatalf("url lacks caller-supplied scope: %s", custom)
+	}
+}
+
 func TestVerifyIDTokenRejectsInvalidTokens(t *testing.T) {
 	simulator, provider := newProvider(t)
 	ctx := context.Background()

@@ -23,7 +23,6 @@ func TestRunPrivacyAcrossLogsAndStatus(t *testing.T) {
 	)
 	environment := localEnvironment(t)
 	dataRoot := environment[config.EnvDataPath]
-	environment[config.EnvOIDCEnabled] = "true"
 	environment[config.EnvOIDCConfigurationURL] = "https://oidc.example.test/.well-known/openid-configuration"
 	environment[config.EnvOIDCClientID] = "braind"
 	environment[config.EnvOIDCClientSecret] = clientSecret
