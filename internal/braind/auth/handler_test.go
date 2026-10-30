@@ -34,7 +34,61 @@ func (c *fakeClock) Now() time.Time { return c.current }
 
 func (c *fakeClock) Advance(by time.Duration) { c.current = c.current.Add(by) }
 
-var authorizeLink = regexp.MustCompile(`href="([^"]+)"`)
+// authorizeLink extracts the provider authorization URL from the prompt's
+// sign-in anchor. It is anchored on the anchor itself because the pages'
+// heads now also carry the shared stylesheet href (see
+// TestAuthPagesAlignWithLanding).
+var authorizeLink = regexp.MustCompile(`<a role="button" class="sign-in" href="([^"]+)">Sign in</a>`)
+
+// TestAuthPagesAlignWithLanding pins the presentation cleanup: the sign-in
+// and failure pages render from embedded templates (like the landing page),
+// are styled by the shared stylesheet, and carry the landing page's CSP.
+func TestAuthPagesAlignWithLanding(t *testing.T) {
+	fixture := newFixture(t, nil, nil)
+	for _, page := range []struct {
+		name string
+		path string
+	}{
+		{"sign-in prompt", "/login"},
+		{"failure page", "/oauth2/callback"}, // missing state renders the HTML failure page
+	} {
+		recorder := httptest.NewRecorder()
+		fixture.handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, page.path, nil))
+		if got := recorder.Header().Get("Content-Security-Policy"); got != "default-src 'self'" {
+			t.Errorf("%s CSP = %q, want default-src 'self'", page.name, got)
+		}
+		if body := recorder.Body.String(); !strings.Contains(body, `href="/static/pico.min.css"`) || !strings.Contains(body, `href="/static/style.css"`) {
+			t.Errorf("%s does not link the shared stylesheets (Pico + brand): %s", page.name, body)
+		}
+	}
+}
+
+// TestSignedInVisitorLeavesLogin verifies /login sends an authenticated
+// visitor onward instead of offering a second sign-in: they arrived via a
+// stale bookmark, the back button, or a leftover ?login_error, and they are
+// headed to their (sanitized) intended destination.
+func TestSignedInVisitorLeavesLogin(t *testing.T) {
+	fixture := newFixture(t, nil, nil)
+	cookie := fixture.signIn(t)
+	visit := func(target string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, target, nil)
+		request.AddCookie(cookie)
+		fixture.handler.ServeHTTP(recorder, request)
+		return recorder
+	}
+	if recorder := visit("/login?next=/notes/readme&login_error=provider_error"); recorder.Code != http.StatusFound || recorder.Header().Get("Location") != "/notes/readme" {
+		t.Fatalf("signed-in /login = %d -> %q, want 302 -> /notes/readme", recorder.Code, recorder.Header().Get("Location"))
+	}
+	if recorder := visit("/login?next=%2F%2Fevil.test"); recorder.Code != http.StatusFound || recorder.Header().Get("Location") != "/" {
+		t.Fatalf("foreign next = %d -> %q, want 302 -> /", recorder.Code, recorder.Header().Get("Location"))
+	}
+	anonymous := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/login", nil))
+	if anonymous.Code != http.StatusOK || !strings.Contains(anonymous.Body.String(), "Sign in to Brain") {
+		t.Fatalf("anonymous /login must still render the prompt, got %d", anonymous.Code)
+	}
+}
 
 func newFixture(t *testing.T, configure func(*authtest.Provider), mutate func(*auth.HandlerConfig)) *fixture {
 	t.Helper()

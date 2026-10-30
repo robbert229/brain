@@ -70,16 +70,46 @@ func TestLandingPageContentIndependentOfScripts(t *testing.T) {
 }
 
 func TestStaticStylesheetServed(t *testing.T) {
+	for _, path := range []string{"/static/style.css", "/static/pico.min.css"} {
+		recorder := httptest.NewRecorder()
+		Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("GET %s expected status %d, got %d", path, http.StatusOK, recorder.Code)
+		}
+		if got := recorder.Header().Get("Content-Type"); got != "text/css; charset=utf-8" {
+			t.Errorf("%s unexpected Content-Type: %q", path, got)
+		}
+		if strings.TrimSpace(recorder.Body.String()) == "" {
+			t.Errorf("%s body is empty", path)
+		}
+	}
+}
+
+// TestStaticAssetsRevalidateWithETag pins the cache strategy: no-cache
+// forces revalidation on every use, and the content-hash ETag makes the
+// unchanged answer a bodyless 304, so deploys take effect immediately.
+func TestStaticAssetsRevalidateWithETag(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/static/style.css", nil))
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("GET /static/style.css expected status %d, got %d", http.StatusOK, recorder.Code)
+		t.Fatalf("GET /static/style.css = %d, want 200", recorder.Code)
 	}
-	if got := recorder.Header().Get("Content-Type"); got != "text/css; charset=utf-8" {
-		t.Errorf("unexpected Content-Type: %q", got)
+	if got := recorder.Header().Get("Cache-Control"); got != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", got)
 	}
-	if strings.TrimSpace(recorder.Body.String()) == "" {
-		t.Error("style.css body is empty")
+	etag := recorder.Header().Get("ETag")
+	if !strings.HasPrefix(etag, `"`) || len(etag) < 10 {
+		t.Fatalf("missing content ETag: %q", etag)
+	}
+	revalidation := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/static/style.css", nil)
+	request.Header.Set("If-None-Match", etag)
+	Handler().ServeHTTP(revalidation, request)
+	if revalidation.Code != http.StatusNotModified {
+		t.Fatalf("If-None-Match revalidation = %d, want 304", revalidation.Code)
+	}
+	if revalidation.Body.Len() != 0 {
+		t.Error("304 must carry no body")
 	}
 }
 

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main id="main" class="container">
+    <hgroup>
+      <h1>Sign in to Brain</h1>
+      <p class="tagline">Use your organization identity to continue.</p>
+    </hgroup>
+    {{if .Error}}<article role="alert">Sign-in could not be completed ({{.Error}}).</article>{{end}}
+    <p><a role="button" class="sign-in" href="{{.AuthorizeURL}}">Sign in</a></p>
+  </main>
+</body>
+</html>
