@@ -30,6 +30,7 @@ type Book struct {
 	Rating     float64
 	RatingText string
 	Filename   string
+	Path       string
 }
 
 // frontmatterDelimiter opens and closes the YAML metadata block.
@@ -82,7 +83,7 @@ func ParseNote(filename string, content []byte) (Book, bool) {
 	if !isBook(metadata) {
 		return Book{}, false
 	}
-	title, review := titleAndReview(body, strings.TrimSuffix(filename, ".md"))
+	title, review := titleAndReview(body, strings.TrimSuffix(filepath.Base(filename), ".md"))
 	rating, ratingText := parseRating(metadata["rating"])
 	return Book{
 		Title:      title,

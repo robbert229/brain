@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"gopkg.in/yaml.v3"
 )
 
 // ReviewDraft is one submitted review form, raw values (data-model.md). The
@@ -231,4 +233,139 @@ func slugify(title string) string {
 		return "book"
 	}
 	return cleaned
+}
+
+// ReadReview resolves one catalog-relative note without following a path out
+// of the Books folder and returns its editable fields.
+func ReadReview(booksDir, relativePath string, maxBytes int64) (ReviewDraft, error) {
+	filename, err := reviewPath(booksDir, relativePath)
+	if err != nil {
+		return ReviewDraft{}, err
+	}
+	info, err := os.Lstat(filename)
+	if err != nil || !info.Mode().IsRegular() {
+		return ReviewDraft{}, fmt.Errorf("book note not found")
+	}
+	if info.Size() > maxBytes {
+		return ReviewDraft{}, fmt.Errorf("book note exceeds size limit")
+	}
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return ReviewDraft{}, fmt.Errorf("read book note: %w", err)
+	}
+	book, ok := ParseNote(filepath.Base(filename), content)
+	if !ok {
+		return ReviewDraft{}, fmt.Errorf("not a book note")
+	}
+	review := book.Review
+	if book.Cover != "" {
+		review = strings.TrimSpace(strings.ReplaceAll(review, "![["+book.Cover+"]]", ""))
+	}
+	draft := ReviewDraft{Title: book.Title, Author: book.Author, Rating: FormatRating(book.Rating, book.RatingText), Cover: book.Cover, Review: review}
+	if !book.Finished.IsZero() {
+		draft.Finished = book.Finished.Format("2006-01-02")
+	}
+	return draft, nil
+}
+
+// UpdateReview atomically updates the selected note in place. Unknown YAML
+// fields are retained while the editable book metadata and Markdown body are
+// replaced with the submitted values.
+func UpdateReview(booksDir, relativePath string, draft ReviewDraft, maxBytes int64, now time.Time) error {
+	if invalid := ValidateDraft(draft, maxBytes, now); invalid != nil {
+		return invalid
+	}
+	filename, err := reviewPath(booksDir, relativePath)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(filename)
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("book note not found")
+	}
+	if info.Size() > maxBytes {
+		return &ValidationError{Fields: map[string]string{"review": "The existing note is too large to edit."}}
+	}
+	original, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("read book note: %w", err)
+	}
+	frontmatter, _, ok := splitFrontmatter(string(original))
+	if !ok {
+		return fmt.Errorf("invalid book frontmatter")
+	}
+	metadata := map[string]any{}
+	if err := yaml.Unmarshal([]byte(frontmatter), &metadata); err != nil || !isBook(metadata) {
+		return fmt.Errorf("invalid book frontmatter")
+	}
+	setOrDelete := func(key, value string) {
+		if value == "" {
+			delete(metadata, key)
+		} else {
+			metadata[key] = value
+		}
+	}
+	setOrDelete("author", strings.TrimSpace(draft.Author))
+	setOrDelete("rating", strings.TrimSpace(draft.Rating))
+	setOrDelete("cover", strings.TrimSpace(draft.Cover))
+	setOrDelete("finished", strings.TrimSpace(draft.Finished))
+	yamlBytes, err := yaml.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("encode book frontmatter: %w", err)
+	}
+	content := "---\n" + string(yamlBytes) + "---\n\n# " + strings.TrimSpace(draft.Title) + "\n\n" + strings.TrimSpace(draft.Review) + "\n"
+	if cover := strings.TrimSpace(draft.Cover); cover != "" {
+		content += "\n![[" + cover + "]]\n"
+	}
+	if int64(len(content)) > maxBytes {
+		return &ValidationError{Fields: map[string]string{"review": "The finished note is too large; shorten the review."}}
+	}
+	temp, err := os.CreateTemp(filepath.Dir(filename), ".braind-edit-*.md")
+	if err != nil {
+		return fmt.Errorf("create temporary book note: %w", err)
+	}
+	tempName := temp.Name()
+	defer os.Remove(tempName)
+	if _, err := temp.WriteString(content); err != nil {
+		temp.Close()
+		return fmt.Errorf("write temporary book note: %w", err)
+	}
+	if err := temp.Chmod(info.Mode().Perm()); err != nil {
+		temp.Close()
+		return fmt.Errorf("set book note permissions: %w", err)
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return fmt.Errorf("sync temporary book note: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close temporary book note: %w", err)
+	}
+	if err := os.Rename(tempName, filename); err != nil {
+		return fmt.Errorf("replace book note: %w", err)
+	}
+	if err := syncDir(filepath.Dir(filename)); err != nil {
+		return err
+	}
+	return nil
+}
+
+func reviewPath(booksDir, relativePath string) (string, error) {
+	if relativePath == "" || strings.Contains(relativePath, "\\") || !filepath.IsLocal(filepath.FromSlash(relativePath)) || filepath.Ext(relativePath) != ".md" {
+		return "", fmt.Errorf("invalid book path")
+	}
+	root, err := filepath.EvalSymlinks(booksDir)
+	if err != nil {
+		return "", fmt.Errorf("books folder unavailable")
+	}
+	filename := filepath.Join(root, filepath.FromSlash(relativePath))
+	parent, err := filepath.EvalSymlinks(filepath.Dir(filename))
+	if err != nil {
+		return "", fmt.Errorf("book folder unavailable")
+	}
+	rel, err := filepath.Rel(root, parent)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("book path escapes books folder")
+	}
+	return filepath.Join(parent, filepath.Base(filename)), nil
 }

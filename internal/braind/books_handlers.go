@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,6 +55,8 @@ func (s *booksSurface) register(mux *http.ServeMux, authenticator *auth.Handler)
 	mux.Handle("GET /books/covers/{filename}", authenticator.RequireAuth(auth.Policy{}, http.HandlerFunc(s.cover)))
 	mux.Handle("GET /books/new", authenticator.RequireAuth(auth.Policy{Minimum: auth.RoleUser}, http.HandlerFunc(s.form)))
 	mux.Handle("POST /books", authenticator.RequireAuth(auth.Policy{Minimum: auth.RoleUser}, http.HandlerFunc(s.create)))
+	mux.Handle("GET /books/edit", authenticator.RequireAuth(auth.Policy{Minimum: auth.RoleUser}, http.HandlerFunc(s.editForm)))
+	mux.Handle("POST /books/edit", authenticator.RequireAuth(auth.Policy{Minimum: auth.RoleUser}, http.HandlerFunc(s.update)))
 }
 
 // bookCard is one fully formatted shelf card; every display rule is applied
@@ -66,6 +69,7 @@ type bookCard struct {
 	Status     string
 	Cover      string
 	CoverFound bool
+	EditURL    string
 }
 
 type booksPage struct {
@@ -91,6 +95,10 @@ func (s *booksSurface) shelf(w http.ResponseWriter, r *http.Request) {
 		CanCreate:   verified && identity.Role.Meets(auth.RoleUser) && !s.readOnly,
 	}
 	for _, entry := range catalog.Entries {
+		editURL := ""
+		if page.CanCreate {
+			editURL = "/books/edit?file=" + url.QueryEscape(entry.Path)
+		}
 		page.Entries = append(page.Entries, bookCard{
 			Title:      entry.Title,
 			Review:     entry.Review,
@@ -99,6 +107,7 @@ func (s *booksSurface) shelf(w http.ResponseWriter, r *http.Request) {
 			Status:     entry.Status,
 			Cover:      entry.Cover,
 			CoverFound: entry.CoverFound,
+			EditURL:    editURL,
 		})
 	}
 	writePageHeaders(w)
@@ -172,6 +181,46 @@ type reviewFormPage struct {
 	Values      books.ReviewDraft
 	Errors      []string
 	CSRFToken   string
+	File        string
+	Edit        bool
+}
+
+func (s *booksSurface) editForm(w http.ResponseWriter, r *http.Request) {
+	if s.readOnly {
+		s.noticeReadonly(w)
+		return
+	}
+	file := r.URL.Query().Get("file")
+	draft, err := books.ReadReview(s.booksDir, file, s.maxNoteBytes)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	writePageHeaders(w)
+	_ = reviewFormTemplate.Execute(w, reviewFormPage{ProductName: productName, Values: draft, CSRFToken: s.csrfToken(r), File: file, Edit: true})
+}
+
+func (s *booksSurface) update(w http.ResponseWriter, r *http.Request) {
+	if s.readOnly {
+		s.noticeReadonly(w)
+		return
+	}
+	file := r.FormValue("file")
+	draft := reviewDraftFromRequest(r)
+	if err := books.UpdateReview(s.booksDir, file, draft, s.maxNoteBytes, time.Now().UTC()); err != nil {
+		var invalid *books.ValidationError
+		if !errors.As(err, &invalid) {
+			http.NotFound(w, r)
+			return
+		}
+		writePageHeaders(w)
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		page := s.formPage(r, draft, invalid)
+		page.File, page.Edit = file, true
+		_ = reviewFormTemplate.Execute(w, page)
+		return
+	}
+	http.Redirect(w, r, "/books", http.StatusSeeOther)
 }
 
 // form serves the add-review page as an ordinary HTML form (Principle IV);
@@ -195,14 +244,7 @@ func (s *booksSurface) form(w http.ResponseWriter, r *http.Request) {
 // Authentication, role, and CSRF arrived through RequireAuth before this
 // handler ran (contracts/http.md).
 func (s *booksSurface) create(w http.ResponseWriter, r *http.Request) {
-	draft := books.ReviewDraft{
-		Title:    r.FormValue("title"),
-		Author:   r.FormValue("author"),
-		Rating:   r.FormValue("rating"),
-		Cover:    r.FormValue("cover"),
-		Finished: r.FormValue("finished"),
-		Review:   r.FormValue("review"),
-	}
+	draft := reviewDraftFromRequest(r)
 	if s.readOnly {
 		s.noticeReadonly(w)
 		return
@@ -219,6 +261,14 @@ func (s *booksSurface) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/books", http.StatusSeeOther)
+}
+
+func reviewDraftFromRequest(r *http.Request) books.ReviewDraft {
+	return books.ReviewDraft{
+		Title: r.FormValue("title"), Author: r.FormValue("author"),
+		Rating: r.FormValue("rating"), Cover: r.FormValue("cover"),
+		Finished: r.FormValue("finished"), Review: r.FormValue("review"),
+	}
 }
 
 // formPage assembles the re-render context: sorted field messages so the

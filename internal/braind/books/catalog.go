@@ -83,6 +83,9 @@ func Scan(booksDir, coversDir string) (Catalog, error) {
 			catalog.Skipped++
 			return nil
 		}
+		if rel, relErr := filepath.Rel(booksDir, p); relErr == nil {
+			book.Path = filepath.ToSlash(rel)
+		}
 		catalog.Entries = append(catalog.Entries, Entry{Book: book, CoverFound: coverFound(coversDir, book.Cover)})
 		return nil
 	})

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Add a review · {{.ProductName}}</title>
+  <title>{{if .Edit}}Edit review{{else}}Add a review{{end}} · {{.ProductName}}</title>
   <link rel="stylesheet" href="/static/pico.min.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
@@ -11,7 +11,7 @@
   <a class="skip-link" href="#main">Skip to main content</a>
   <main id="main" class="container">
     <hgroup>
-      <h1>Add a review</h1>
+      <h1>{{if .Edit}}Edit review{{else}}Add a review{{end}}</h1>
       <p class="tagline">one new note, filed in your vault's Books folder</p>
     </hgroup>
     {{if .Errors}}
@@ -22,8 +22,9 @@
       </ul>
     </article>
     {{end}}
-    <form method="post" action="/books">
+    <form method="post" action="{{if .Edit}}/books/edit{{else}}/books{{end}}">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      {{if .Edit}}<input type="hidden" name="file" value="{{.File}}">{{end}}
       <label for="review-title">Title (required)
         <input id="review-title" name="title" maxlength="200" required value="{{.Values.Title}}">
       </label>
@@ -42,7 +43,7 @@
       <label for="review-body">Review (required)
         <textarea id="review-body" name="review" rows="8" required>{{.Values.Review}}</textarea>
       </label>
-      <button type="submit">Save review</button>
+      <button type="submit">{{if .Edit}}Save changes{{else}}Save review{{end}}</button>
     </form>
     <p><a href="/books">Back to the shelf</a></p>
   </main>
