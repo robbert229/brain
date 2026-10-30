@@ -20,7 +20,7 @@
     {{if .Entries}}
     {{range .Entries}}
     <article class="book-card" aria-label="{{.Title}}">
-      {{if .CoverFound}}<img class="cover" src="/books/covers/{{.Cover}}" alt="Cover of {{.Title}}" loading="lazy">{{else}}<div class="cover placeholder" aria-hidden="true"></div>{{end}}
+      {{if .CoverFound}}<img class="cover" src="/books/covers/{{.Cover}}" alt="Cover of {{.Title}}" loading="lazy">{{else}}<img class="cover placeholder" src="/static/book-cover-placeholder.svg" alt="No cover available for {{.Title}}">{{end}}
       <h2>{{.Title}}</h2>
       <p class="byline">{{.Byline}}</p>
       {{if or .Interest .Status}}<p class="chips">{{.Interest}}{{if and .Interest .Status}} · {{end}}{{.Status}}</p>{{end}}

@@ -1,6 +1,12 @@
 package books
 
 import (
+	"bytes"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -98,8 +104,45 @@ func coverFound(coversDir, cover string) bool {
 	if cover == "" {
 		return false
 	}
-	info, err := os.Stat(filepath.Join(coversDir, cover))
-	return err == nil && !info.IsDir() && info.Size() > 0
+	root, err := os.OpenRoot(coversDir)
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+	file, err := root.Open(cover)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Mode().Perm()&0444 == 0 {
+		return false
+	}
+	if err := validateImage(file, cover); err != nil {
+		return false
+	}
+	return true
+}
+
+func validateImage(file io.ReadSeeker, name string) error {
+	var header [512]byte
+	n, err := io.ReadFull(file, header[:])
+	if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		return err
+	}
+	headerBytes := header[:n]
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext == ".webp" {
+		if n < 12 || string(headerBytes[:4]) != "RIFF" || string(headerBytes[8:12]) != "WEBP" {
+			return io.ErrUnexpectedEOF
+		}
+	} else {
+		if _, _, err := image.DecodeConfig(bytes.NewReader(headerBytes)); err != nil {
+			return err
+		}
+	}
+	_, err = file.Seek(0, io.SeekStart)
+	return err
 }
 
 // Sort orders the shelf newest-finished first, undated books after every
