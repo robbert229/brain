@@ -18,7 +18,7 @@ One book note on disk, projected into shelf display values. Produced only by
 | `Title` | string | first `# ` heading of the body, else filename base | always present (fallback) |
 | `Review` | string | body after the title heading, trimmed | empty → card shows no prose |
 | `Author` | string | frontmatter `author` | empty |
-| `Cover` | string | frontmatter `cover` | empty → placeholder tile |
+| `Cover` | string | frontmatter `cover` | empty or unusable attachment → bundled accessible fallback cover |
 | `Interest` | string | frontmatter `interest` | empty → nothing rendered |
 | `Status` | string | frontmatter `status (Media)` | empty → nothing rendered |
 | `Finished` | `time.Time` (date) | frontmatter `finished` | zero → sorts undated, date hidden |
@@ -52,10 +52,11 @@ Result of scanning `<data>/<books folder>` recursively with `fs.WalkDir`.
 
 ### CoverRef (derived)
 
-`Book.Cover` plus existence, determined by one `os.Stat` under
-`<data>/<covers folder>` during the scan. Present → card emits
-`<img src="/books/covers/{url-escaped cover}">`; absent → neutral placeholder tile,
-no `<img>` (SC-003: zero broken images, no-JS).
+`Book.Cover` plus attachment validity, resolved beneath `<data>/<covers folder>`
+during the scan. A readable, non-empty supported image produces
+`<img src="/books/covers/{url-escaped cover}">`; absent, missing, unreadable, empty,
+corrupt, or unsupported attachments produce the bundled accessible fallback-cover
+image at the same dimensions (SC-003: zero broken images, no-JS).
 
 ### ReviewDraft (write side)
 

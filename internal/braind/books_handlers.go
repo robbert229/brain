@@ -135,8 +135,25 @@ func (s *booksSurface) cover(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	root, err := os.OpenRoot(s.coversDir)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer root.Close()
+	file, err := root.Open(name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("Cache-Control", "private, max-age=3600")
-	http.ServeFileFS(w, r, os.DirFS(s.coversDir), name)
+	http.ServeContent(w, r, name, info.ModTime(), file)
 }
 
 // writePageHeaders applies the shared headers for session-gated pages

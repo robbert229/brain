@@ -35,7 +35,8 @@ go run ./cmd/braind   # with BRAIND_DATA_PATH=/tmp/braind-data and normal OIDC e
 ```
 
 Expected: landing page shows the Books card; `/books` lists 130 entries newest-first
-with covers resolving from the attachments folder and placeholder tiles elsewhere;
+with readable covers resolving from the attachments folder and the bundled fallback
+cover for absent or unusable attachments;
 submitting the form creates one `.md` file in the Books folder root that opens in
 Obsidian with frontmatter intact.
 

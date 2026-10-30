@@ -67,23 +67,22 @@ user during specification.
 ## R4 — Cover resolution and serving
 
 - **Decision**: Resolve covers by filename only inside the configured covers folder
-  (`<data>/06 - Meta/Attachments` by default). `GET /books/covers/{filename}` uses
-  `os.DirFS(coversDir)` + `http.ServeFileFS` with the path parameter rejected unless it
-  is a single clean path segment with an image extension (`.jpg .jpeg .png .webp .gif`);
-  content type from the extension; `Last-Modified`/304 come free from `ServeFileFS`;
-  `Cache-Control: private, max-age=3600`. Missing/unreadable → 404. Templates render
-  the card's `<img>` with an `onerror`-free fallback: when the catalog could not stat a
-  cover at scan time, it renders a neutral placeholder tile instead of an `<img>` at all
-  (no broken-image affordance, no request).
+  (`<data>/06 - Meta/Attachments` by default). A catalog entry uses a real cover only
+  when the attachment is a readable, non-empty supported image (`.jpg .jpeg .png .webp .gif`);
+  absent, missing, unreadable, empty, corrupt, or unsupported attachments use the
+  bundled accessible fallback-cover image. `GET /books/covers/{filename}` opens the
+  file beneath a rooted view of the covers folder and rejects unsafe names, missing
+  files, and symlinks that escape the root.
 - **Rationale**: The user confirmed attachments live in `06 - Meta/Attachments/`, so a
-  vault-wide filename index is unnecessary (simpler — Principle III). `DirFS`+`ServeFileFS`
-  gives traversal containment in one stdlib pair; the stat-at-scan check implements
-  SC-003's "no broken images". FR-012 is satisfied structurally: the handler cannot
-  name a file outside the covers folder.
+  vault-wide filename index is unnecessary (simpler — Principle III). Validating image
+  data before linking it avoids broken image UI; the bundled fallback satisfies FR-005
+  offline and without JavaScript. Rooted file access keeps cover serving confined to
+  the configured folder (FR-012).
 - **Alternatives considered**: recursive vault-wide cover index built at startup
   (rejected: extra moving part for a layout we were told about); serving covers
   embedded-in-note `![[...]]` targets from arbitrary vault paths (rejected: FR-012);
-  `onerror` JS placeholder (rejected: Principle IV prefers no-JS correctness).
+  a blank tile or external/generated artwork (rejected: the shelf needs a consistent
+  offline fallback with no third-party request).
 
 ## R5 — Safe note creation (no overwrite, atomic, in-folder)
 

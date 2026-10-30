@@ -1,6 +1,12 @@
 package books
 
 import (
+	"encoding/binary"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -91,15 +97,55 @@ func isMarkdown(name string) bool {
 	return strings.EqualFold(filepath.Ext(name), ".md")
 }
 
-// coverFound resolves the cover by filename inside the covers folder only
-// (FR-005, FR-012); Cover is already a single clean image segment, so the join
-// cannot escape, and anything unreadable, empty, or a directory is "no cover".
+// coverFound accepts only a readable supported image opened beneath the
+// configured covers root. Missing, invalid, empty, and escaping symlink
+// targets are treated as absent covers (FR-005, FR-012).
 func coverFound(coversDir, cover string) bool {
-	if cover == "" {
+	if !IsImageName(cover) {
 		return false
 	}
-	info, err := os.Stat(filepath.Join(coversDir, cover))
-	return err == nil && !info.IsDir() && info.Size() > 0
+	root, err := os.OpenRoot(coversDir)
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+	file, err := root.Open(cover)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Mode().Perm()&0444 == 0 {
+		return false
+	}
+	if err := validateImage(file, cover); err != nil {
+		return false
+	}
+	return true
+}
+
+func validateImage(file *os.File, name string) error {
+	ext := strings.ToLower(filepath.Ext(name))
+	if ext == ".webp" {
+		var header [20]byte
+		n, err := io.ReadFull(file, header[:])
+		if err != nil || n < len(header) || string(header[:4]) != "RIFF" || string(header[8:12]) != "WEBP" {
+			return io.ErrUnexpectedEOF
+		}
+		chunk := string(header[12:16])
+		chunkSize := binary.LittleEndian.Uint32(header[16:20])
+		riffSize := binary.LittleEndian.Uint32(header[4:8])
+		info, statErr := file.Stat()
+		if statErr != nil || (chunk != "VP8 " && chunk != "VP8L" && chunk != "VP8X") || chunkSize == 0 || riffSize < 12+chunkSize || int64(riffSize)+8 > info.Size() {
+			return io.ErrUnexpectedEOF
+		}
+	} else {
+		if _, _, err := image.DecodeConfig(file); err != nil {
+			return err
+		}
+	}
+	_, err := file.Seek(0, io.SeekStart)
+	return err
 }
 
 // Sort orders the shelf newest-finished first, undated books after every
