@@ -550,7 +550,7 @@ func reviewDraftFromRequest(r *http.Request) books.ReviewDraft {
 // error list is deterministic.
 func (s *booksSurface) formPage(r *http.Request, draft books.ReviewDraft, invalid *books.ValidationError) reviewFormPage {
 	page := reviewFormPage{ProductName: productName, Values: draft, CSRFToken: s.csrfToken(r)}
-	for _, field := range []string{"title", "author", "rating", "cover", "finished", "review", "series", "series_number"} {
+	for _, field := range []string{"title", "author", "rating", "cover", "cover_upload", "finished", "review", "series", "series_number"} {
 		if message, found := invalid.Fields[field]; found {
 			page.Errors = append(page.Errors, fmt.Sprintf("%s: %s", field, message))
 		}
