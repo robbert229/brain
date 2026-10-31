@@ -215,7 +215,7 @@ func (h *Handler) handleLogout(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	if !validCSRF(r, session.CSRFToken) {
+	if !validCSRF(w, r, session.CSRFToken) {
 		h.config.Logger.Warn("logout rejected", "component", "auth", "outcome", "csrf_check_failed")
 		h.respondFailure(w, r, http.StatusForbidden, "csrf_check_failed")
 		return
@@ -258,10 +258,19 @@ func (h *Handler) CurrentSession(r *http.Request) (Session, SessionOutcome) {
 }
 
 // validCSRF accepts the session token from either the header or form field.
-func validCSRF(r *http.Request, token string) bool {
+const maxCSRFMultipartBytes = 16 << 20
+
+func validCSRF(w http.ResponseWriter, r *http.Request, token string) bool {
 	candidate := r.Header.Get(CSRFHeader)
 	if candidate == "" {
-		if err := r.ParseForm(); err == nil {
+		var err error
+		if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+			r.Body = http.MaxBytesReader(w, r.Body, maxCSRFMultipartBytes)
+			err = r.ParseMultipartForm(1 << 20)
+		} else {
+			err = r.ParseForm()
+		}
+		if err == nil {
 			candidate = r.Form.Get(CSRFFormField)
 		}
 	}

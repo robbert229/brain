@@ -7,45 +7,85 @@
   <link rel="stylesheet" href="/static/pico.min.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="review-page">
   <a class="skip-link" href="#main">Skip to main content</a>
-  <main id="main" class="container">
-    <hgroup>
-      <h1>{{if .Edit}}Edit review{{else}}Add a review{{end}}</h1>
-      <p class="tagline">one new note, filed in your vault's Books folder</p>
-    </hgroup>
+  <main id="main" class="review-shell">
+    <nav class="books-breadcrumb" aria-label="Breadcrumb">
+      <span class="books-mark" aria-hidden="true">b</span>
+      <a href="/">{{.ProductName}}</a>
+      <span aria-hidden="true">/</span>
+      <a href="/books">personal library</a>
+      <span aria-hidden="true">/</span>
+      <span aria-current="page">{{if .Edit}}edit review{{else}}add a review{{end}}</span>
+    </nav>
+
+    <header class="books-hero review-hero">
+      <div>
+        <p class="books-eyebrow">Your reading record</p>
+        <h1>{{if .Edit}}Edit review{{else}}Add a review{{end}}</h1>
+        <p class="books-intro">{{if .Edit}}Refresh the details and notes for this book.{{else}}Save a book and the thoughts you want to remember.{{end}}</p>
+      </div>
+    </header>
+
     {{if .Errors}}
-    <article aria-label="Form problems">
-      <h2>Check the form</h2>
+    <article class="review-errors" aria-label="Form problems">
+      <h2>Check these details</h2>
       <ul>
         {{range .Errors}}<li>{{.}}</li>{{end}}
       </ul>
     </article>
     {{end}}
-    <form method="post" action="{{if .Edit}}/books/edit{{else}}/books{{end}}">
+
+    <form class="review-form" method="post" enctype="multipart/form-data" action="{{if .Edit}}/books/edit{{else}}/books{{end}}">
       <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
       {{if .Edit}}<input type="hidden" name="file" value="{{.File}}">{{end}}
-      <label for="review-title">Title (required)
-        <input id="review-title" name="title" maxlength="200" required value="{{.Values.Title}}">
-      </label>
-      <label for="review-author">Author
-        <input id="review-author" name="author" maxlength="200" value="{{.Values.Author}}">
-      </label>
-      <label for="review-rating">Rating
-        <input id="review-rating" name="rating" placeholder="4.5/5" value="{{.Values.Rating}}">
-      </label>
-      <label for="review-cover">Cover filename (an attachment in the vault)
-        <input id="review-cover" name="cover" placeholder="book-cover-example.jpg" value="{{.Values.Cover}}">
-      </label>
-      <label for="review-finished">Finished (YYYY-MM-DD)
-        <input id="review-finished" name="finished" placeholder="2026-10-01" value="{{.Values.Finished}}">
-      </label>
-      <label for="review-body">Review (required)
-        <textarea id="review-body" name="review" rows="8" required>{{.Values.Review}}</textarea>
-      </label>
-      <button type="submit">{{if .Edit}}Save changes{{else}}Save review{{end}}</button>
+      <section class="review-section" aria-labelledby="book-details-heading">
+        <h2 id="book-details-heading">Book details</h2>
+        <div class="review-fields">
+          <label class="review-field-wide" for="review-title">Title <span>(required)</span>
+            <input id="review-title" name="title" maxlength="200" required value="{{.Values.Title}}">
+          </label>
+          <label for="review-series">Series
+            <input id="review-series" name="series" maxlength="100" placeholder="Primal Hunter" value="{{.Values.Series}}">
+            <small>Leave blank for a standalone book. A series name files the note in a matching folder.</small>
+          </label>
+          <label for="review-series-number">Volume number
+            <input id="review-series-number" name="series_number" inputmode="decimal" placeholder="8 or 8.5" value="{{.Values.SeriesNumber}}">
+            <small>When set, books are ordered by this number.</small>
+          </label>
+          <label for="review-author">Author
+            <input id="review-author" name="author" maxlength="200" value="{{.Values.Author}}">
+          </label>
+          <label for="review-rating">Rating
+            <input id="review-rating" name="rating" placeholder="4.5/5" value="{{.Values.Rating}}">
+          </label>
+          <label for="review-cover">Cover filename
+            <input id="review-cover" name="cover" placeholder="book-cover-example.jpg" value="{{.Values.Cover}}">
+            <small>Use an image already in your vault attachments.</small>
+          </label>
+          <label for="review-cover-upload">Upload a cover
+            <input id="review-cover-upload" name="cover_upload" type="file" accept="image/jpeg,image/png,image/gif,image/webp">
+            <small>JPG, PNG, GIF, or WebP. Maximum 8 MiB. Uploading replaces the cover filename above.</small>
+          </label>
+          <label for="review-finished">Finished
+            <input id="review-finished" name="finished" placeholder="2026-10-01" value="{{.Values.Finished}}">
+            <small>Enter the date as YYYY-MM-DD.</small>
+          </label>
+        </div>
+      </section>
+
+      <section class="review-section review-text-section" aria-labelledby="review-text-heading">
+        <h2 id="review-text-heading">Your review</h2>
+        <label for="review-body">What do you want to remember? <span>(required)</span>
+          <textarea id="review-body" name="review" rows="9" required>{{.Values.Review}}</textarea>
+        </label>
+      </section>
+
+      <div class="review-actions">
+        <button class="review-save" type="submit">{{if .Edit}}Save changes{{else}}Save review{{end}}</button>
+        <a href="/books">Cancel</a>
+      </div>
     </form>
-    <p><a href="/books">Back to the shelf</a></p>
   </main>
 </body>
 </html>

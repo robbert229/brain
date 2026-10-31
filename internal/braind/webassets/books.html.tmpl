@@ -7,35 +7,76 @@
   <link rel="stylesheet" href="/static/pico.min.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="books-page">
   <a class="skip-link" href="#main">Skip to main content</a>
-  <main id="main" class="container">
-    <hgroup>
-      <h1>Books</h1>
-      <p class="tagline">the reading record, straight from the vault</p>
-    </hgroup>
-    {{if .CanCreate}}
-    <p><a role="button" href="/books/new">Add a review</a></p>
-    {{end}}
+  <main id="main" class="books-shell">
+    <nav class="books-breadcrumb" aria-label="Breadcrumb">
+      <span class="books-mark" aria-hidden="true">b</span>
+      <a href="/">{{.ProductName}}</a>
+      <span aria-hidden="true">/</span>
+      <span aria-current="page">personal library</span>
+    </nav>
+
+    <header class="books-hero">
+      <div>
+        <p class="books-eyebrow">Your reading record</p>
+        <h1>Books</h1>
+        <p class="books-intro">A calm place for what you’ve read, what you’re reading, and what stayed with you.</p>
+      </div>
+      {{if .CanWrite}}<a class="books-primary" href="/books/new"><span aria-hidden="true">＋</span> Add a review</a>{{end}}
+    </header>
+
     {{if .Entries}}
+    <section class="books-toolbar" aria-label="Find books" hidden>
+      <label class="visually-hidden" for="book-search">Search titles, authors, or notes</label>
+      <input class="books-search" id="book-search" type="search" placeholder="Search titles or notes" autocomplete="off">
+      <div class="books-filters" role="group" aria-label="Filter by status">
+        <button class="books-filter active" type="button" data-filter="all" aria-pressed="true">All books</button>
+        <button class="books-filter" type="button" data-filter="finished" aria-pressed="false">Finished</button>
+        <button class="books-filter" type="button" data-filter="reading" aria-pressed="false">Reading</button>
+      </div>
+      <span class="books-count" aria-live="polite">{{len .Entries}} {{if eq (len .Entries) 1}}book{{else}}books{{end}}</span>
+    </section>
+    <p class="books-section-label"><span>Recently added</span><span>{{len .Entries}} {{if eq (len .Entries) 1}}title{{else}}titles{{end}}</span></p>
+    <section class="books-list" id="books-list" aria-label="Your books">
     {{range .Entries}}
-    <article class="book-card" aria-label="{{.Title}}">
-      {{if .CoverFound}}<img class="cover" src="/books/covers/{{.Cover}}" alt="Cover of {{.Title}}" loading="lazy">{{else}}<img class="cover placeholder" src="/static/book-cover-placeholder.svg" alt="No cover available for {{.Title}}">{{end}}
-      <h2>{{.Title}}</h2>
-      <p class="byline">{{.Byline}}</p>
-      {{if or .Interest .Status}}<p class="chips">{{.Interest}}{{if and .Interest .Status}} · {{end}}{{.Status}}</p>{{end}}
-      <div class="review">{{.Review}}</div>
-      {{if .EditURL}}<p><a href="{{.EditURL}}">Edit review</a></p>{{end}}
-    </article>
-    {{end}}
-    <footer>
-      {{if .Truncated}}<p class="muted">Showing the first books found — the folder holds more than the scan budget.</p>{{end}}
-      {{if .Skipped}}<p class="muted">{{.Skipped}} notes skipped (no book metadata or unreadable).</p>{{end}}
-    </footer>
+      <article class="book-row" data-status="{{.Status}}" aria-label="{{.Title}}">
+        {{if .CoverFound}}<img class="book-cover" src="/books/covers/{{.Cover}}" alt="Cover of {{.Title}}" loading="lazy">{{else}}<img class="book-cover placeholder" src="/static/book-cover-placeholder.svg" alt="No cover available for {{.Title}}" loading="lazy">{{end}}
+        <div class="book-main">
+          <div class="book-heading">
+            <h2>{{.Title}}</h2>
+            {{if .Author}}<span class="book-author">{{.Author}}</span>{{end}}
+          </div>
+          <div class="book-meta">
+            {{if .Status}}<span class="book-status">{{.Status}}</span>{{end}}
+            {{if .Interest}}<span class="book-interest">{{.Interest}}</span>{{end}}
+            {{if .Series}}<span class="book-series">Series: {{.Series}}{{if .SeriesPosition}} · {{.SeriesPosition}}{{end}}</span>{{end}}
+            {{if .RatingStars}}<span class="book-rating" role="img" aria-label="{{.Rating}}">{{.RatingStars}}</span>{{else if .Rating}}<span class="book-rating book-rating-text">{{.Rating}}</span>{{end}}
+            {{if .Finished}}<time class="book-date" datetime="{{.Finished}}">{{.Finished}}</time>{{end}}
+          </div>
+          <div class="book-searchable"><p class="book-review">{{.Review}}</p></div>
+        </div>
+        {{if .EditURL}}<div class="book-actions"><a class="book-action" href="{{.EditURL}}">Edit review</a><a class="book-action book-delete" href="{{.DeleteURL}}">Delete review</a></div>{{end}}
+      </article>
+      {{end}}
+      <p class="books-no-results" hidden>No books match this search. Try another title or status.</p>
+    </section>
     {{else}}
-    <p>There are no books yet. Add your first review to fill the shelf.</p>
+    <section class="books-empty" aria-labelledby="empty-heading">
+      <p class="books-eyebrow">A shelf, waiting to be filled</p>
+      <h2 id="empty-heading">No books yet</h2>
+      <p>There are no books yet. Your reading notes will appear here when you add one.</p>
+    </section>
     {{end}}
-    <p><a href="/">Back to brain</a></p>
+
+    {{if or .Skipped .Truncated}}
+    <footer class="books-footnotes">
+      {{if .Truncated}}<p>Showing the first books found — the folder holds more than the scan budget.</p>{{end}}
+      {{if .Skipped}}<p>{{.Skipped}} notes skipped (no book metadata or unreadable).</p>{{end}}
+    </footer>
+    {{end}}
+    <a class="books-back" href="/">← &nbsp; Back to brain</a>
   </main>
+  {{if .Entries}}<script src="/static/books.js" defer></script>{{end}}
 </body>
 </html>

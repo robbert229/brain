@@ -20,17 +20,20 @@ import (
 // produces valid values; every field degrades to its zero value rather than
 // failing the whole note (FR-004).
 type Book struct {
-	Title      string
-	Review     string
-	Author     string
-	Cover      string
-	Interest   string
-	Status     string
-	Finished   time.Time
-	Rating     float64
-	RatingText string
-	Filename   string
-	Path       string
+	Title           string
+	Review          string
+	Author          string
+	Cover           string
+	Interest        string
+	Status          string
+	Finished        time.Time
+	Rating          float64
+	RatingText      string
+	Filename        string
+	Path            string
+	Series          string
+	SeriesNumber    float64
+	HasSeriesNumber bool
 }
 
 // frontmatterDelimiter opens and closes the YAML metadata block.

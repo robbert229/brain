@@ -15,12 +15,15 @@ import (
 // ReviewDraft is one submitted review form, raw values (data-model.md). The
 // web layer trims nothing; validation owns all normalization.
 type ReviewDraft struct {
-	Title    string
-	Author   string
-	Rating   string
-	Cover    string
-	Finished string
-	Review   string
+	Title        string
+	Author       string
+	Rating       string
+	Cover        string
+	Finished     string
+	Review       string
+	Series       string
+	SeriesNumber string
+	SeriesSet    bool
 }
 
 // ValidationError reports per-field refusals so the form can re-render with
@@ -54,6 +57,18 @@ func ValidateDraft(draft ReviewDraft, maxBytes int64, now time.Time) *Validation
 	if strings.TrimSpace(draft.Review) == "" {
 		fields["review"] = "A review is required."
 	}
+	series := strings.TrimSpace(draft.Series)
+	seriesNumber := strings.TrimSpace(draft.SeriesNumber)
+	if len([]rune(series)) > 100 || len(series) > 200 || containsControl(series) || strings.ContainsAny(series, `/\\`) || series == "." || series == ".." {
+		fields["series"] = "The series must be a folder name without slashes or control characters (100 characters or fewer)."
+	}
+	if seriesNumber != "" {
+		if series == "" {
+			fields["series_number"] = "A series is required when a volume number is provided."
+		} else if !validSeriesNumber(seriesNumber) {
+			fields["series_number"] = "The volume number must be a non-negative integer or decimal, such as 8 or 8.5."
+		}
+	}
 	if author := strings.TrimSpace(draft.Author); author != "" {
 		if len([]rune(author)) > 200 {
 			fields["author"] = "The author name must be 200 characters or fewer."
@@ -84,6 +99,22 @@ func ValidateDraft(draft ReviewDraft, maxBytes int64, now time.Time) *Validation
 	return &ValidationError{Fields: fields}
 }
 
+func validSeriesNumber(raw string) bool {
+	if len(raw) > 24 || strings.Count(raw, ".") > 1 {
+		return false
+	}
+	for _, r := range raw {
+		if (r < '0' || r > '9') && r != '.' {
+			return false
+		}
+	}
+	if raw == "" || strings.HasPrefix(raw, ".") || strings.HasSuffix(raw, ".") {
+		return false
+	}
+	number, err := strconv.ParseFloat(raw, 64)
+	return err == nil && number >= 0 && !strings.Contains(strings.ToLower(raw), "nan")
+}
+
 func containsControl(s string) bool {
 	return strings.ContainsFunc(s, unicode.IsControl)
 }
@@ -109,8 +140,8 @@ func validRating(raw string) bool {
 	return number >= 0 && number <= 5
 }
 
-// CreateReview durably files one new book note in the Books folder root
-// (FR-008). "Never overwrites" is a kernel guarantee: the final name is
+// CreateReview durably files one new book note in the Books root or its
+// assigned series folder (FR-008, FR-026). "Never overwrites" is a kernel guarantee: the final name is
 // published with os.Link, which fails rather than clobber, and colliding
 // titles pick slug.md → slug-2.md → slug-3.md. The bytes reach the final name
 // only after an fsynced temp write, and every failure path removes the temp
@@ -123,17 +154,27 @@ func CreateReview(booksDir string, draft ReviewDraft, maxBytes int64, now time.T
 	if err := os.MkdirAll(booksDir, 0o755); err != nil {
 		return "", fmt.Errorf("create books folder: %w", err)
 	}
-	content := renderNote(draft)
-	temp, err := os.CreateTemp(booksDir, ".braind-review-*.md")
+	targetDir, err := seriesDirectory(booksDir, strings.TrimSpace(draft.Series))
+	if err != nil {
+		return "", err
+	}
+	filename, err := writeNewNote(targetDir, generatedFilenameBase(draft), renderNote(draft))
+	if err != nil {
+		return "", err
+	}
+	if series := strings.TrimSpace(draft.Series); series != "" {
+		filename = filepath.ToSlash(filepath.Join(series, filename))
+	}
+	return filename, nil
+}
+
+func writeNewNote(dir, base, content string) (string, error) {
+	temp, err := os.CreateTemp(dir, ".braind-review-*.md")
 	if err != nil {
 		return "", fmt.Errorf("create temp note: %w", err)
 	}
 	tempName := temp.Name()
-	defer func() {
-		if tempName != "" {
-			_ = os.Remove(tempName)
-		}
-	}()
+	defer func() { _ = os.Remove(tempName) }()
 	if _, err := temp.WriteString(content); err != nil {
 		temp.Close()
 		return "", fmt.Errorf("write temp note: %w", err)
@@ -145,28 +186,95 @@ func CreateReview(booksDir string, draft ReviewDraft, maxBytes int64, now time.T
 	if err := temp.Close(); err != nil {
 		return "", fmt.Errorf("close temp note: %w", err)
 	}
-	slug := slugify(draft.Title)
 	for attempt := 1; ; attempt++ {
-		filename := slug + ".md"
+		filename := base + ".md"
 		if attempt > 1 {
-			filename = fmt.Sprintf("%s-%d.md", slug, attempt)
+			filename = fmt.Sprintf("%s-%d.md", base, attempt)
 		}
-		target := filepath.Join(booksDir, filename)
-		if err := os.Link(tempName, target); err != nil {
+		if err := os.Link(tempName, filepath.Join(dir, filename)); err != nil {
 			if os.IsExist(err) {
-				continue // title collision: the next suffix is the answer (FR-008)
+				continue
 			}
 			return "", fmt.Errorf("publish note: %w", err)
 		}
 		if err := os.Remove(tempName); err != nil {
 			return "", fmt.Errorf("remove temp note: %w", err)
 		}
-		tempName = ""
-		if err := syncDir(booksDir); err != nil {
+		if err := syncDir(dir); err != nil {
 			return "", err
 		}
 		return filename, nil
 	}
+}
+
+func seriesDirectory(booksDir, series string) (string, error) {
+	root, err := filepath.EvalSymlinks(booksDir)
+	if err != nil {
+		return "", fmt.Errorf("books folder unavailable: %w", err)
+	}
+	if series == "" {
+		return root, nil
+	}
+	dir := filepath.Join(root, series)
+	info, err := os.Lstat(dir)
+	if os.IsNotExist(err) {
+		if err := os.Mkdir(dir, 0o755); err != nil && !os.IsExist(err) {
+			return "", fmt.Errorf("create series folder: %w", err)
+		}
+		info, err = os.Lstat(dir)
+	}
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return "", fmt.Errorf("series folder unavailable")
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", fmt.Errorf("series folder unavailable: %w", err)
+	}
+	rel, err := filepath.Rel(root, resolved)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("series folder escapes books folder")
+	}
+	return resolved, nil
+}
+
+func generatedFilenameBase(draft ReviewDraft) string {
+	slug := slugify(draft.Title)
+	series := strings.TrimSpace(draft.Series)
+	if series == "" {
+		return slug
+	}
+	position := strings.TrimSpace(draft.SeriesNumber)
+	prefix := series + " "
+	if position != "" {
+		position = canonicalSeriesNumber(position)
+		prefix += position + " - "
+	} else {
+		prefix += "- "
+	}
+	maxSlugBytes := 240 - len(prefix)
+	if maxSlugBytes < 1 {
+		maxSlugBytes = 1
+	}
+	if len(slug) > maxSlugBytes {
+		slug = strings.TrimRight(slug[:maxSlugBytes], "-")
+	}
+	return prefix + slug
+}
+
+func canonicalSeriesNumber(raw string) string {
+	number, _ := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	value := strconv.FormatFloat(number, 'f', -1, 64)
+	if dot := strings.IndexByte(value, '.'); dot >= 0 {
+		integer := value[:dot]
+		if len(integer) < 2 {
+			integer = "0" + integer
+		}
+		return integer + value[dot:]
+	}
+	if len(value) < 2 {
+		return "0" + value
+	}
+	return value
 }
 
 // syncDir flushes the folder entry itself so the rename/link survives power
@@ -262,15 +370,22 @@ func ReadReview(booksDir, relativePath string, maxBytes int64) (ReviewDraft, err
 		review = strings.TrimSpace(strings.ReplaceAll(review, "![["+book.Cover+"]]", ""))
 	}
 	draft := ReviewDraft{Title: book.Title, Author: book.Author, Rating: FormatRating(book.Rating, book.RatingText), Cover: book.Cover, Review: review}
+	if filepath.Dir(filepath.FromSlash(relativePath)) != "." {
+		draft.Series = strings.Split(filepath.ToSlash(relativePath), "/")[0]
+		if number, ok := parseSeriesNumber(filepath.Base(relativePath), draft.Series); ok {
+			draft.SeriesNumber = strconv.FormatFloat(number, 'f', -1, 64)
+		}
+	}
+	draft.SeriesSet = true
 	if !book.Finished.IsZero() {
 		draft.Finished = book.Finished.Format("2006-01-02")
 	}
 	return draft, nil
 }
 
-// UpdateReview atomically updates the selected note in place. Unknown YAML
-// fields are retained while the editable book metadata and Markdown body are
-// replaced with the submitted values.
+// UpdateReview atomically updates the selected note. Unknown YAML fields are
+// retained while the editable book metadata and Markdown body are replaced;
+// an explicitly changed series assignment moves the note to its new path.
 func UpdateReview(booksDir, relativePath string, draft ReviewDraft, maxBytes int64, now time.Time) error {
 	if invalid := ValidateDraft(draft, maxBytes, now); invalid != nil {
 		return invalid
@@ -320,7 +435,29 @@ func UpdateReview(booksDir, relativePath string, draft ReviewDraft, maxBytes int
 	if int64(len(content)) > maxBytes {
 		return &ValidationError{Fields: map[string]string{"review": "The finished note is too large; shorten the review."}}
 	}
-	temp, err := os.CreateTemp(filepath.Dir(filename), ".braind-edit-*.md")
+	series, oldNumber, hadNumber := seriesAssignment(relativePath)
+	unchangedAssignment := !draft.SeriesSet || (strings.TrimSpace(draft.Series) == series && sameSeriesNumber(strings.TrimSpace(draft.SeriesNumber), oldNumber, hadNumber))
+	var targetDir string
+	var targetBase string
+	if unchangedAssignment {
+		targetDir = filepath.Dir(filename)
+		targetBase = strings.TrimSuffix(filepath.Base(filename), ".md")
+	} else {
+		targetDir, err = seriesDirectory(booksDir, strings.TrimSpace(draft.Series))
+		if err != nil {
+			return err
+		}
+		targetBase = generatedFilenameBase(draft)
+	}
+	target := filepath.Join(targetDir, targetBase+".md")
+	if err := replaceReviewNote(filename, target, targetDir, targetBase, content, info.Mode().Perm()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func replaceReviewNote(filename, target string, targetDir, targetBase, content string, mode os.FileMode) error {
+	temp, err := os.CreateTemp(targetDir, ".braind-edit-*.md")
 	if err != nil {
 		return fmt.Errorf("create temporary book note: %w", err)
 	}
@@ -330,7 +467,7 @@ func UpdateReview(booksDir, relativePath string, draft ReviewDraft, maxBytes int
 		temp.Close()
 		return fmt.Errorf("write temporary book note: %w", err)
 	}
-	if err := temp.Chmod(info.Mode().Perm()); err != nil {
+	if err := temp.Chmod(mode); err != nil {
 		temp.Close()
 		return fmt.Errorf("set book note permissions: %w", err)
 	}
@@ -341,11 +478,90 @@ func UpdateReview(booksDir, relativePath string, draft ReviewDraft, maxBytes int
 	if err := temp.Close(); err != nil {
 		return fmt.Errorf("close temporary book note: %w", err)
 	}
-	if err := os.Rename(tempName, filename); err != nil {
-		return fmt.Errorf("replace book note: %w", err)
+	if filepath.Clean(target) == filepath.Clean(filename) {
+		if err := os.Rename(tempName, filename); err != nil {
+			return fmt.Errorf("replace book note: %w", err)
+		}
+		return syncDir(filepath.Dir(filename))
+	}
+	for attempt := 1; ; attempt++ {
+		candidate := target
+		if attempt > 1 {
+			suffix := fmt.Sprintf("-%d.md", attempt)
+			candidate = filepath.Join(targetDir, targetBase+suffix)
+		}
+		if err := os.Link(tempName, candidate); err != nil {
+			if os.IsExist(err) {
+				continue
+			}
+			return fmt.Errorf("publish updated note: %w", err)
+		}
+		if err := syncDir(targetDir); err != nil {
+			_ = os.Remove(candidate)
+			return err
+		}
+		if err := os.Remove(filename); err != nil {
+			_ = os.Remove(candidate)
+			return fmt.Errorf("remove old book note: %w", err)
+		}
+		if err := syncDir(filepath.Dir(filename)); err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
+func seriesAssignment(relativePath string) (string, string, bool) {
+	clean := filepath.FromSlash(relativePath)
+	if filepath.Dir(clean) == "." {
+		return "", "", false
+	}
+	series := strings.Split(filepath.ToSlash(clean), "/")[0]
+	number, ok := parseSeriesNumber(filepath.Base(clean), series)
+	if !ok {
+		return series, "", false
+	}
+	return series, strconv.FormatFloat(number, 'f', -1, 64), true
+}
+
+func sameSeriesNumber(submitted, existing string, existingSet bool) bool {
+	if !existingSet {
+		return submitted == ""
+	}
+	if !validSeriesNumber(submitted) {
+		return false
+	}
+	left, leftErr := strconv.ParseFloat(submitted, 64)
+	right, rightErr := strconv.ParseFloat(existing, 64)
+	return leftErr == nil && rightErr == nil && left == right
+}
+
+// DeleteReview removes one bounded, valid book note beneath booksDir. It does
+// not remove cover attachments because another note may reference them.
+func DeleteReview(booksDir, relativePath string, maxBytes int64) error {
+	filename, err := reviewPath(booksDir, relativePath)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(filename)
+	if err != nil || !info.Mode().IsRegular() {
+		return fmt.Errorf("book note not found")
+	}
+	if info.Size() > maxBytes {
+		return fmt.Errorf("book note exceeds size limit")
+	}
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return fmt.Errorf("read book note: %w", err)
+	}
+	if _, ok := ParseNote(filepath.Base(filename), content); !ok {
+		return fmt.Errorf("not a book note")
+	}
+	if err := os.Remove(filename); err != nil {
+		return fmt.Errorf("remove book note: %w", err)
 	}
 	if err := syncDir(filepath.Dir(filename)); err != nil {
-		return err
+		return fmt.Errorf("sync book folder after deletion: %w", err)
 	}
 	return nil
 }

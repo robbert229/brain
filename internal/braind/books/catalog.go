@@ -1,6 +1,7 @@
 package books
 
 import (
+	"bytes"
 	"encoding/binary"
 	"image"
 	_ "image/gif"
@@ -10,7 +11,9 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -85,6 +88,10 @@ func Scan(booksDir, coversDir string) (Catalog, error) {
 		}
 		if rel, relErr := filepath.Rel(booksDir, p); relErr == nil {
 			book.Path = filepath.ToSlash(rel)
+			if filepath.Dir(rel) != "." {
+				book.Series = strings.Split(filepath.ToSlash(rel), "/")[0]
+				book.SeriesNumber, book.HasSeriesNumber = parseSeriesNumber(book.Filename, book.Series)
+			}
 		}
 		catalog.Entries = append(catalog.Entries, Entry{Book: book, CoverFound: coverFound(coversDir, book.Cover)})
 		return nil
@@ -94,6 +101,33 @@ func Scan(booksDir, coversDir string) (Catalog, error) {
 	}
 	Sort(catalog.Entries)
 	return catalog, nil
+}
+
+var seriesPosition = regexp.MustCompile(`^([0-9]+(\.[0-9]+)?)([[:space:]-]|$)`)
+
+// parseSeriesNumber reads the initial volume position following the series
+// name. An optional "Volume" or "Book" label is accepted. Filename matching
+// is case-insensitive; leading zeroes are naturally ignored numerically.
+func parseSeriesNumber(filename, series string) (float64, bool) {
+	ext := filepath.Ext(filename)
+	stem := filename[:len(filename)-len(ext)]
+	if len(stem) < len(series) || !strings.EqualFold(stem[:len(series)], series) {
+		return 0, false
+	}
+	remainder := strings.TrimLeft(strings.TrimSpace(stem[len(series):]), " -–—")
+	lower := strings.ToLower(remainder)
+	for _, label := range []string{"volume", "book"} {
+		if strings.HasPrefix(lower, label) && (len(remainder) == len(label) || remainder[len(label)] == ' ' || remainder[len(label)] == '-') {
+			remainder = strings.TrimLeft(strings.TrimSpace(remainder[len(label):]), " -–—")
+			break
+		}
+	}
+	match := seriesPosition.FindStringSubmatch(remainder)
+	if len(match) < 2 {
+		return 0, false
+	}
+	number, err := strconv.ParseFloat(match[1], 64)
+	return number, err == nil
 }
 
 func isMarkdown(name string) bool {
@@ -128,6 +162,17 @@ func coverFound(coversDir, cover string) bool {
 }
 
 func validateImage(file *os.File, name string) error {
+	return validateImageReader(file, name)
+}
+
+// ValidateImageData checks an uploaded image using the same supported image
+// rules used by shelf cover resolution. The filename is only used to select
+// the decoder; callers must derive its extension from the actual bytes.
+func ValidateImageData(name string, data []byte) error {
+	return validateImageReader(bytes.NewReader(data), name)
+}
+
+func validateImageReader(file io.ReadSeeker, name string) error {
 	ext := strings.ToLower(filepath.Ext(name))
 	if ext == ".webp" {
 		var header [20]byte
@@ -138,8 +183,7 @@ func validateImage(file *os.File, name string) error {
 		chunk := string(header[12:16])
 		chunkSize := binary.LittleEndian.Uint32(header[16:20])
 		riffSize := binary.LittleEndian.Uint32(header[4:8])
-		info, statErr := file.Stat()
-		if statErr != nil || (chunk != "VP8 " && chunk != "VP8L" && chunk != "VP8X") || chunkSize == 0 || riffSize < 12+chunkSize || int64(riffSize)+8 > info.Size() {
+		if (chunk != "VP8 " && chunk != "VP8L" && chunk != "VP8X") || chunkSize == 0 || riffSize < 12+chunkSize || int64(riffSize)+8 > int64(lenFromStart(file)) {
 			return io.ErrUnexpectedEOF
 		}
 	} else {
@@ -149,6 +193,15 @@ func validateImage(file *os.File, name string) error {
 	}
 	_, err := file.Seek(0, io.SeekStart)
 	return err
+}
+
+func lenFromStart(file io.ReadSeeker) int {
+	end, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0
+	}
+	_, _ = file.Seek(0, io.SeekStart)
+	return int(end)
 }
 
 // Sort orders the shelf newest-finished first, undated books after every

@@ -1,14 +1,23 @@
 # Debug image variant (make image-debug / image-publish-debug). Identical
-# build to .ko.yaml except the base: Ubuntu instead of distroless, so
-# `kubectl exec` gets a bash shell inside the running pod for debugging.
+# build to .ko.yaml except the base: Chainguard's curl image instead of
+# distroless. It carries the CA certificate bundle that Go's crypto/x509
+# needs for TLS (the OIDC provider calls), and it ships /usr/bin/curl, so
+# in-pod debugging is `kubectl exec ... -- curl -sv https://...`.
+#
+# Not Ubuntu: the official ubuntu:24.04 base ships WITHOUT ca-certificates,
+# which left the Go binary without a TLS trust store and broke OIDC sign-in
+# (discovery_unavailable). Chainguard images are shellless by design —
+# exec by absolute binary path.
 #
 # Dev/manual use only — never publish this as a release image. The container
-# still runs as the daemon's nonroot user (UID 65532) because the
-# StatefulSet's pod securityContext overrides the image's root user; the
-# read-only root filesystem stays intact.
+# already runs as nonroot UID 65532, matching the StatefulSet's pod
+# securityContext, and works on the read-only root filesystem.
 #
 # Selected via KO_CONFIG_PATH by the Makefile's debug targets.
-defaultBaseImage: docker.io/library/ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
+# Pinned index digest (amd64+arm64); re-resolve with:
+#   curl -sI -H "Accept: application/vnd.oci.image.index.v1+json" \
+#     https://cgr.dev/v2/chainguard/curl/manifests/latest | grep -i docker-content-digest
+defaultBaseImage: cgr.dev/chainguard/curl:latest@sha256:a64879785161853ebb8841501ab74a1b2cfc766ea706e609b38b50e063eeabab
 defaultPlatforms:
   - linux/amd64
   - linux/arm64
