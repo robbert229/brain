@@ -84,6 +84,19 @@ func postBookEdit(t *testing.T, f *booksWriteFixture, cookie *http.Cookie, form 
 	return recorder
 }
 
+func postBookDelete(t *testing.T, f *booksWriteFixture, cookie *http.Cookie, form url.Values, csrf string) *httptest.ResponseRecorder {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/books/delete", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if csrf != "" {
+		request.Header.Set(auth.CSRFHeader, csrf)
+	}
+	request.AddCookie(cookie)
+	f.handler.ServeHTTP(recorder, request)
+	return recorder
+}
+
 func TestBookEditFlowUpdatesNestedNoteAndRequiresRights(t *testing.T) {
 	fixture := newBooksWriteFixture(t, false)
 	const notePath = "Series/Book.md"
@@ -138,6 +151,7 @@ func TestBookEditFlowUpdatesNestedNoteAndRequiresRights(t *testing.T) {
 
 func TestReviewFormGatedByRole(t *testing.T) {
 	fixture := newBooksWriteFixture(t, false)
+	fixture.booksFixture.writeNote(t, "Book.md", "---\ntype: Zettel\nstatus (Media): Finished\n---\n\n# Gated Book\nReview.\n")
 	viewer := fixture.signIn(t, "access-brain-viewer")
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/books/new", nil)
@@ -179,6 +193,12 @@ func TestReviewFormGatedByRole(t *testing.T) {
 	}
 	if strings.Contains(shelfFor(viewer), `href="/books/new"`) {
 		t.Error("viewer shelf must not offer Add a review (SC-004)")
+	}
+	if !strings.Contains(shelfFor(member), `href="/books/delete?file=Book.md"`) {
+		t.Error("contributor shelf must offer Delete review")
+	}
+	if strings.Contains(shelfFor(viewer), `href="/books/delete?`) {
+		t.Error("viewer shelf must not offer Delete review")
 	}
 }
 
@@ -281,5 +301,98 @@ func TestReadOnlyModeDisablesCreate(t *testing.T) {
 	entries, err := os.ReadDir(fixture.booksDir)
 	if err == nil && len(entries) != 0 {
 		t.Fatalf("read-only mode wrote files: %v", entries)
+	}
+}
+
+func TestBookDeleteRequiresExplicitConfirmationAndRights(t *testing.T) {
+	fixture := newBooksWriteFixture(t, false)
+	const notePath = "Series/Delete Me.md"
+	fixture.booksFixture.writeNote(t, notePath, "---\ntype: Zettel\nstatus (Media): Finished\ncover: shared.jpg\n---\n\n# Delete Me\nA review to delete.\n")
+	fixture.booksFixture.writeCover(t, "shared.jpg")
+	user := fixture.signIn(t, "access-brain-user")
+	viewer := fixture.signIn(t, "access-brain-viewer")
+
+	request := httptest.NewRequest(http.MethodGet, "/books/delete?file=Series%2FDelete%20Me.md", nil)
+	request.AddCookie(user)
+	recorder := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("user GET delete confirmation = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	for _, want := range []string{"Delete Me", "permanently", `action="/books/delete"`, `name="confirm" value="yes"`, `href="/books"`} {
+		if !strings.Contains(recorder.Body.String(), want) {
+			t.Errorf("confirmation page lacks %q: %s", want, recorder.Body.String())
+		}
+	}
+	noteFilename := filepath.Join(fixture.booksDir, filepath.FromSlash(notePath))
+	if _, err := os.Stat(noteFilename); err != nil {
+		t.Fatalf("GET confirmation removed the note: %v", err)
+	}
+	anonymous := httptest.NewRecorder()
+	fixture.handler.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/books/delete?file=Series%2FDelete%20Me.md", nil))
+	if anonymous.Code != http.StatusFound {
+		t.Fatalf("anonymous GET confirmation = %d, want login redirect", anonymous.Code)
+	}
+	unsafe := httptest.NewRecorder()
+	unsafeRequest := httptest.NewRequest(http.MethodGet, "/books/delete?file=..%2Foutside.md", nil)
+	unsafeRequest.AddCookie(user)
+	fixture.handler.ServeHTTP(unsafe, unsafeRequest)
+	if unsafe.Code != http.StatusNotFound {
+		t.Fatalf("unsafe GET confirmation = %d, want 404", unsafe.Code)
+	}
+
+	form := url.Values{"file": {notePath}, "confirm": {"yes"}}
+	if recorder := postBookDelete(t, fixture, user, form, ""); recorder.Code != http.StatusForbidden {
+		t.Fatalf("delete POST without CSRF = %d, want 403", recorder.Code)
+	}
+	if recorder := postBookDelete(t, fixture, user, form, "invalid-token"); recorder.Code != http.StatusForbidden {
+		t.Fatalf("delete POST with invalid CSRF = %d, want 403", recorder.Code)
+	}
+	if recorder := postBookDelete(t, fixture, viewer, form, fixture.csrfFor(t, viewer)); recorder.Code != http.StatusForbidden {
+		t.Fatalf("viewer delete POST = %d, want 403", recorder.Code)
+	}
+	if recorder := postBookDelete(t, fixture, user, url.Values{"file": {notePath}}, fixture.csrfFor(t, user)); recorder.Code != http.StatusBadRequest {
+		t.Fatalf("delete POST without confirmation = %d, want 400", recorder.Code)
+	}
+	if _, err := os.Stat(noteFilename); err != nil {
+		t.Fatalf("refused delete removed the note: %v", err)
+	}
+
+	readOnly := newBooksWriteFixture(t, true)
+	readOnly.booksFixture.writeNote(t, notePath, "---\ntype: Zettel\nstatus (Media): Finished\n---\n\n# Delete Me\nKeep me in read-only mode.\n")
+	readOnlyUser := readOnly.signIn(t, "access-brain-user")
+	request = httptest.NewRequest(http.MethodGet, "/books/delete?file=Series%2FDelete%20Me.md", nil)
+	request.AddCookie(readOnlyUser)
+	recorder = httptest.NewRecorder()
+	readOnly.handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("read-only GET confirmation = %d, want 403", recorder.Code)
+	}
+	if recorder := postBookDelete(t, readOnly, readOnlyUser, form, readOnly.csrfFor(t, readOnlyUser)); recorder.Code != http.StatusForbidden {
+		t.Fatalf("read-only delete POST = %d, want 403", recorder.Code)
+	}
+	readOnlyShelf := httptest.NewRecorder()
+	readOnlyRequest := httptest.NewRequest(http.MethodGet, "/books", nil)
+	readOnlyRequest.AddCookie(readOnlyUser)
+	readOnly.handler.ServeHTTP(readOnlyShelf, readOnlyRequest)
+	if strings.Contains(readOnlyShelf.Body.String(), `href="/books/delete?`) {
+		t.Error("read-only shelf must hide delete actions")
+	}
+	if _, err := os.Stat(filepath.Join(readOnly.booksDir, filepath.FromSlash(notePath))); err != nil {
+		t.Errorf("read-only delete removed note: %v", err)
+	}
+
+	recorder = postBookDelete(t, fixture, user, form, fixture.csrfFor(t, user))
+	if recorder.Code != http.StatusSeeOther {
+		t.Fatalf("confirmed delete POST = %d body=%s, want 303", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Location") != "/books" {
+		t.Fatalf("delete Location = %q, want /books", recorder.Header().Get("Location"))
+	}
+	if _, err := os.Stat(noteFilename); !os.IsNotExist(err) {
+		t.Errorf("confirmed delete left note on disk: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(fixture.coversDir, "shared.jpg")); err != nil {
+		t.Errorf("confirmed delete removed shared cover: %v", err)
 	}
 }

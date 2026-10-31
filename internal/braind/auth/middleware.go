@@ -22,7 +22,7 @@ func (h *Handler) RequireAuth(policy Policy, next http.Handler) http.Handler {
 		session, outcome := h.LookupSession(r)
 		switch outcome {
 		case OutcomeActive:
-			if isStateChange(r) && !validCSRF(r, session.CSRFToken) {
+			if isStateChange(r) && !validCSRF(w, r, session.CSRFToken) {
 				h.config.Logger.Warn("request rejected", "component", "auth", "outcome", "csrf_check_failed")
 				h.respondFailure(w, r, http.StatusForbidden, "csrf_check_failed")
 				return

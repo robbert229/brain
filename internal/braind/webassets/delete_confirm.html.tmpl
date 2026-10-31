@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Delete review · {{.ProductName}}</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="review-page delete-page">
+  <a class="skip-link" href="#main">Skip to main content</a>
+  <main id="main" class="review-shell">
+    <nav class="books-breadcrumb" aria-label="Breadcrumb">
+      <span class="books-mark" aria-hidden="true">b</span>
+      <a href="/">{{.ProductName}}</a>
+      <span aria-hidden="true">/</span>
+      <a href="/books">personal library</a>
+      <span aria-hidden="true">/</span>
+      <span aria-current="page">delete review</span>
+    </nav>
+
+    <header class="books-hero review-hero">
+      <div>
+        <p class="books-eyebrow">Remove a book from your record</p>
+        <h1>Delete review?</h1>
+        <p class="books-intro">This permanently deletes the Markdown review note. The cover image, if any, will remain in your attachments.</p>
+      </div>
+    </header>
+
+    <section class="delete-summary" aria-labelledby="delete-book-title">
+      <p>This is the book you selected:</p>
+      <h2 id="delete-book-title">{{.Title}}</h2>
+    </section>
+
+    <form class="delete-actions" method="post" action="/books/delete">
+      <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+      <input type="hidden" name="file" value="{{.File}}">
+      <input type="hidden" name="confirm" value="yes">
+      <button class="delete-confirm" type="submit">Delete review</button>
+      <a href="/books">Cancel</a>
+    </form>
+  </main>
+</body>
+</html>

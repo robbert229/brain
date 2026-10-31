@@ -224,6 +224,65 @@ func TestUpdateReviewRefusesUnsafePaths(t *testing.T) {
 	}
 }
 
+func TestDeleteReviewRemovesOnlyTheBookNote(t *testing.T) {
+	booksDir := t.TempDir()
+	coversDir := t.TempDir()
+	notePath := filepath.Join(booksDir, "Series", "Book.md")
+	if err := os.MkdirAll(filepath.Dir(notePath), 0o755); err != nil {
+		t.Fatalf("mkdir nested folder: %v", err)
+	}
+	if err := os.WriteFile(notePath, []byte("---\ntype: Zettel\nstatus (Media): Finished\ncover: shared.jpg\n---\n\n# Book\nReview.\n"), 0o644); err != nil {
+		t.Fatalf("write book note: %v", err)
+	}
+	cover := filepath.Join(coversDir, "shared.jpg")
+	if err := os.WriteFile(cover, []byte("shared image bytes"), 0o644); err != nil {
+		t.Fatalf("write cover: %v", err)
+	}
+	unrelated := filepath.Join(booksDir, "Other.md")
+	if err := os.WriteFile(unrelated, []byte("---\ntype: Zettel\nstatus (Media): Finished\n---\n# Other\n"), 0o644); err != nil {
+		t.Fatalf("write unrelated book: %v", err)
+	}
+
+	if err := DeleteReview(booksDir, "Series/Book.md", 2<<20); err != nil {
+		t.Fatalf("DeleteReview: %v", err)
+	}
+	if _, err := os.Stat(notePath); !os.IsNotExist(err) {
+		t.Errorf("deleted note still exists: %v", err)
+	}
+	if got, err := os.ReadFile(cover); err != nil || string(got) != "shared image bytes" {
+		t.Errorf("cover was removed or changed: got %q, err %v", got, err)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Errorf("unrelated note was removed: %v", err)
+	}
+}
+
+func TestDeleteReviewRefusesUnsafeTargets(t *testing.T) {
+	booksDir := t.TempDir()
+	outside := t.TempDir()
+	outsideNote := filepath.Join(outside, "Book.md")
+	if err := os.WriteFile(outsideNote, []byte("---\nstatus: Finished\n---\n# Outside\n"), 0o644); err != nil {
+		t.Fatalf("write outside note: %v", err)
+	}
+	if err := os.Symlink(outside, filepath.Join(booksDir, "linked")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(booksDir, "Plain.md"), []byte("# Not a book note\n"), 0o644); err != nil {
+		t.Fatalf("write non-book note: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(booksDir, "folder.md"), 0o755); err != nil {
+		t.Fatalf("write directory target: %v", err)
+	}
+	for _, unsafe := range []string{"../Book.md", outsideNote, "linked/Book.md", "Plain.md", "missing.md", "folder.md"} {
+		if err := DeleteReview(booksDir, unsafe, 2<<20); err == nil {
+			t.Errorf("DeleteReview(%q) unexpectedly succeeded", unsafe)
+		}
+	}
+	if got, err := os.ReadFile(outsideNote); err != nil || !strings.Contains(string(got), "Outside") {
+		t.Errorf("outside note was modified: got %q, err %v", got, err)
+	}
+}
+
 func TestSlugify(t *testing.T) {
 	for input, want := range map[string]string{
 		"A Thousand Li 01 - The First Step":                    "a-thousand-li-01-the-first-step",

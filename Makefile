@@ -12,11 +12,14 @@ run-braind:
 test:
 	go test ./...
 
+test-e2e:
+	npm run test:e2e
+
 image:
 	$(KO) build ./cmd/braind --bare --local --platform=$(PLATFORM) --tags=$(IMAGE_TAG)
 
-# Debug image: same binary on an Ubuntu base so `kubectl exec ... -- bash`
-# works inside the pod. Local build only; publish with image-publish-debug.
+# Debug image: same binary on the Chainguard curl base (CA bundle + curl,
+# shellless) for in-pod debugging. Local build; publish with image-publish-debug.
 image-debug:
 	KO_CONFIG_PATH=.ko-debug.yaml $(KO) build ./cmd/braind --bare --local --platform=$(PLATFORM) --tags=$(IMAGE_TAG)-debug
 
@@ -27,7 +30,7 @@ image-publish:
 	@test -n "$(KO_DOCKER_REPO)" || (echo "KO_DOCKER_REPO is required" >&2; exit 2)
 	KO_DOCKER_REPO=$(KO_DOCKER_REPO) $(KO) build ./cmd/braind --bare --tags=$(IMAGE_TAG),latest --image-refs=image-ref.txt
 
-# Publishes the Ubuntu-based debug image as $(IMAGE_TAG)-debug. It never
+# Publishes the Chainguard-based debug image as $(IMAGE_TAG)-debug. It never
 # touches `latest`, and its refs land in image-ref-debug.txt so a debug roll
 # can never clobber the normal deploy's image-ref.txt.
 image-publish-debug:

@@ -1,0 +1,27 @@
+{
+  "name": "brain",
+  "version": "1.0.0",
+  "description": "`brain` is the client for `braind`, an HTTP daemon that provides access to a Markdown vault. The client connects to a running daemon. The project is under active development; see the [roadmap](docs/roadmap.md) for current status and the [feature specs](specs/) for planned capabilities.",
+  "main": "commitlint.config.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test:e2e": "playwright test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/robbert229/brain.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/robbert229/brain/issues"
+  },
+  "homepage": "https://github.com/robbert229/brain#readme",
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

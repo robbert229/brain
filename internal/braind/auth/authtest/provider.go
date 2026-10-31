@@ -15,6 +15,8 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -61,8 +63,17 @@ type issuedCode struct {
 // New starts a provider with one signing key and a full discovery document.
 func New(t testing.TB) *Provider {
 	t.Helper()
+	provider := NewStandalone()
+	provider.t = t
+	t.Cleanup(provider.Close)
+	return provider
+}
+
+// NewStandalone starts the same local OIDC simulator without binding its
+// lifetime to a testing.TB. It is intended for the separate real-browser E2E
+// fixture process; production code must not import this package.
+func NewStandalone() *Provider {
 	provider := &Provider{
-		t:        t,
 		keys:     make(map[string]*rsa.PrivateKey),
 		codes:    make(map[string]issuedCode),
 		access:   make(map[string]map[string]any),
@@ -77,9 +88,11 @@ func New(t testing.TB) *Provider {
 	provider.addKey("kid-1")
 	server := httptest.NewServer(http.HandlerFunc(provider.serve))
 	provider.server = server
-	t.Cleanup(server.Close)
 	return provider
 }
+
+// Close stops the simulated provider.
+func (p *Provider) Close() { p.server.Close() }
 
 // URL returns the provider's discovery document URL.
 func (p *Provider) URL() string {
@@ -434,7 +447,7 @@ func (p *Provider) signIDToken(claims map[string]any, nonce string) string {
 	digest := sha256.Sum256([]byte(signingInput))
 	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
 	if err != nil {
-		p.t.Fatalf("sign simulated id token: %v", err)
+		p.fatalf("sign simulated id token: %v", err)
 	}
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
@@ -487,7 +500,7 @@ func (p *Provider) writeJSON(w http.ResponseWriter, status int, document any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(document); err != nil {
-		p.t.Errorf("encode simulated response: %v", err)
+		p.errorf("encode simulated response: %v", err)
 	}
 }
 
@@ -498,7 +511,7 @@ func (p *Provider) IDTokenFromUnadvertisedKey(claims map[string]any) string {
 	kid := "kid-unadvertised-" + base64.RawURLEncoding.EncodeToString(randomBytes(3))
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		p.t.Fatalf("generate unadvertised key: %v", err)
+		p.fatalf("generate unadvertised key: %v", err)
 	}
 	p.keys[kid] = key
 	merged := p.claimsLocked()
@@ -526,7 +539,7 @@ func (p *Provider) IDTokenFromUnadvertisedKey(claims map[string]any) string {
 	digest := sha256.Sum256([]byte(input))
 	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, digest[:])
 	if err != nil {
-		p.t.Fatalf("sign id token: %v", err)
+		p.fatalf("sign id token: %v", err)
 	}
 	return input + "." + base64.RawURLEncoding.EncodeToString(signature)
 }
@@ -540,7 +553,7 @@ func (p *Provider) addKey(kid string) {
 func (p *Provider) addKeyLocked(kid string) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		p.t.Fatalf("generate signing key: %v", err)
+		p.fatalf("generate signing key: %v", err)
 	}
 	p.keys[kid] = key
 	p.currentKID = kid
@@ -550,6 +563,22 @@ func (p *Provider) addKeyLocked(kid string) {
 		}
 	}
 	p.servedKIDs = append(p.servedKIDs, kid)
+}
+
+func (p *Provider) fatalf(format string, args ...any) {
+	if p.t != nil {
+		p.t.Fatalf(format, args...)
+		return
+	}
+	panic(fmt.Sprintf(format, args...))
+}
+
+func (p *Provider) errorf(format string, args ...any) {
+	if p.t != nil {
+		p.t.Errorf(format, args...)
+		return
+	}
+	log.Printf(format, args...)
 }
 
 func bigEndianBytes(value int) []byte {

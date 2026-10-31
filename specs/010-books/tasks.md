@@ -15,7 +15,7 @@ description: "Task list for Book Reviews (spec 010)"
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
-- **[Story]**: US1 = browse shelf, US2 = write review, US3 = glance polish, US4 = edit existing review
+- **[Story]**: US1 = browse shelf, US2 = write review, US3 = glance polish, US4 = edit existing review, US5 = delete review
 - Paths are repository-relative.
 
 ---
@@ -71,9 +71,9 @@ description: "Task list for Book Reviews (spec 010)"
 
 ## Phase 4: User Story 2 — Write a new book review (Priority: P2)
 
-**Goal**: Contributor fills the form (title, review required; author, rating, cover, finished optional) and submits; one Obsidian-convention note appears in the Books folder and on the shelf.
+**Goal**: Contributor fills the form (title and review required; author, rating, cover, finished, series, and volume optional) and submits; one Obsidian-convention note appears at its standalone or series path and on the shelf.
 
-**Independent Test**: Submit the form against a fixture data dir → new `.md` with data-model.md's byte-exact frontmatter/body/`![[cover]]` layout exists in the Books folder root; shelf includes it; unsafe inputs write nothing; viewer/read-only refused. (quickstart.md row 3 + httptest row.)
+**Independent Test**: Submit standalone and series forms against a fixture data dir → new `.md` notes with the data-model.md frontmatter/body/`![[cover]]` layout exist at their generated paths; shelf includes them; unsafe inputs write nothing; viewer/read-only refused.
 
 ### Tests for User Story 2 ⚠️ write FIRST, must fail
 
@@ -82,7 +82,7 @@ description: "Task list for Book Reviews (spec 010)"
 
 ### Implementation for User Story 2
 
-- [X] T016 [US2] Implement `internal/braind/books/writer.go`: `ReviewDraft{Title, Review, Author, Rating, Cover, Finished string}` + `ValidateDraft(draft, maxBytes) (ValidationErrors)` + `CreateReview(dataDir, booksDir string, draft ReviewDraft, maxBytes int64) (filename string, err error)` implementing research R5 exactly — slugify "lowercase, runs of non-alphanumerics → `-`, trim `-`, empty → `book`"; pick first free `slug.md`/`-2`/`-3`; `O_CREATE|O_EXCL|O_WRONLY` temp in the Books folder, write + `File.Sync`, `os.Rename`, `Sync` the folder; on any error remove the temp file
+- [X] T016 [US2] Implement `internal/braind/books/writer.go`: `ReviewDraft` validation and `CreateReview`; generate collision-safe standalone slugs or series paths from the optional folder and volume fields; atomically publish notes without overwriting existing files.
 - [X] T017 [US2] Form template `internal/braind/webassets/review_form.html.tmpl`: plain `<form method="post" action="/books">` (works without JS — Principle IV) with hidden CSRF field, labelled fields in data-model.md order, `Save review` submit, error list above fields on re-render
 - [X] T018 [US2] Implement `formHandler` (GET `/books/new`) and `createHandler` (POST `/books`) in `internal/braind/books_handlers.go`: role gate `Role.Meets(auth.RoleUser)` + read-only 403 + CSRF via the existing session check; success `303` → `/books`; 422 re-render; register both routes in `newHandler`; add the conditional "Add a review" link to `books.html.tmpl` (shown only when writable + contributor)
 
@@ -110,9 +110,9 @@ description: "Task list for Book Reviews (spec 010)"
 
 ## Phase 6: User Story 4 — Edit an existing book review (Priority: P2)
 
-**Goal**: A contributor or administrator updates an existing shelf note in place, without losing unrelated frontmatter or moving the note.
+**Goal**: A contributor or administrator updates an existing shelf note without losing unrelated frontmatter; changing series assignment moves it to a generated path.
 
-**Independent Test**: Edit a nested fixture note; the same file and folder remain, updated values appear on the shelf, unrelated metadata is retained, unsafe paths are refused, and viewer/read-only requests cannot change files.
+**Independent Test**: Edit a nested fixture note; unchanged assignments retain the path, changed assignments move safely, unrelated metadata is retained, unsafe paths are refused, and viewer/read-only requests cannot change files.
 
 ### Tests for User Story 4
 
@@ -121,14 +121,33 @@ description: "Task list for Book Reviews (spec 010)"
 
 ### Implementation for User Story 4
 
-- [X] T028 [US4] Carry each scanned note's relative path through `internal/braind/books/book.go` and `internal/braind/books/catalog.go`; implement bounded safe read and atomic in-place update in `internal/braind/books/writer.go`, preserving unrelated frontmatter.
+- [X] T028 [US4] Carry each scanned note's relative path through `internal/braind/books/book.go` and `internal/braind/books/catalog.go`; implement bounded safe read and atomic update/move in `internal/braind/books/writer.go`, preserving unrelated frontmatter.
 - [X] T029 [US4] Add role-gated GET/POST `/books/edit` handlers in `internal/braind/books_handlers.go` and a prefilled edit form/action in `internal/braind/webassets/review_form.html.tmpl` and `internal/braind/webassets/books.html.tmpl`; hide edit actions in read-only mode.
 
-**Checkpoint**: Existing nested notes can be edited in place with authorization, CSRF, validation, and path confinement.
+**Checkpoint**: Existing notes can be edited with authorization, CSRF, validation, and path confinement; assignment changes move notes safely without overwriting.
 
 ---
 
-## Phase 7: Polish & Cross-Cutting Concerns
+## Phase 7: User Story 5 — Delete a book review (Priority: P2)
+
+**Goal**: A contributor removes an unwanted review only after confirming the identified book; cancellation and refused requests leave all files unchanged.
+
+**Independent Test**: Open the confirmation page for a fixture note and verify it remains untouched; cancel and verify it remains visible; confirm a second time and verify only the note disappears while its cover attachment remains. Viewer, read-only, CSRF, and unsafe-path requests are refused.
+
+### Tests and implementation for User Story 5 (vertical TDD slices)
+
+- [X] T030 [US5] Add `DeleteReview` domain tests in `internal/braind/books/writer_test.go`: successful deletion of a nested valid book note and retention of its cover; refusal of traversal, absolute path, symlink escape, missing note, directory, and non-book note.
+- [X] T031 [US5] Implement `books.DeleteReview` in `internal/braind/books/writer.go` using the existing safe relative-path resolution; verify the target is a regular book note, remove only that note, and sync its containing directory.
+- [X] T032 [US5] Add HTTP tests in `internal/braind/books_write_test.go`: GET confirmation names the book and has no side effect; POST without confirmation or valid CSRF, as viewer, or in read-only mode refuses without mutation; valid contributor confirmation redirects and deletes the selected note only.
+- [X] T033 [US5] Implement role-gated GET/POST `/books/delete` handlers, CSRF-protected confirmation form, a book-identifying confirmation page with explicit Delete review and Cancel actions, and writable/read-only behavior.
+- [X] T034 [US5] Add Playwright coverage proving the shelf Delete review action opens confirmation, cancellation preserves the entry, and explicit confirmation removes it from the shelf after reload; viewer does not see delete actions and cannot directly open the confirmation route.
+- [X] T035 [US5] Add a conditional Delete review action to each writable shelf entry; style the confirmation page and destructive action consistently with the Books palette and responsive form pages.
+
+**Checkpoint**: Deletion requires an explicit confirmation, is authorized and CSRF-protected, is confined to valid book notes, and preserves cover attachments.
+
+---
+
+## Phase 8: Polish & Cross-Cutting Concerns
 
 - [X] T021 [P] Add `BRAIND_BOOKS_FOLDER` and `BRAIND_COVERS_FOLDER` env entries (with the defaults above) to `deploy/install.yaml` next to the existing `BRAIND_DATA_PATH` block
 - [X] T022 [P] Full gate: `gofmt -l internal/braind` empty, `go vet ./...`, `go test ./...` green — record results
@@ -146,13 +165,15 @@ description: "Task list for Book Reviews (spec 010)"
 - **Phase 4 (US2)**: needs Phase 2 only for the writer path; the 303→shelf test reuses US1's shelf. T014/T015 first, then T016–T018
 - **Phase 5 (US3)**: needs US1 (T009's fixture harness); T019 first, then T020
 - **Phase 6 (US4)**: needs the catalog path from Phase 2; implement safe domain read/update before the edit routes
-- **Phase 7 (Polish)**: all desired stories complete
+- **Phase 7 (US5)**: needs the catalog-relative safe path logic from the domain package and existing auth/CSRF wiring
+- **Phase 8 (Polish)**: all desired stories complete
 
 ### Cross-story notes
 
 - US2's writer is independent of US1's reader (opposite directions on the vault) — it could ship without the shelf rendering, but its acceptance includes the shelf, so deliver after US1.
 - US3 is a pure presentation delta on US1's cards.
 - US4 uses catalog-relative paths and can begin after the domain/catalog phase; edit tests precede the handlers.
+- US5 uses the same catalog-relative path rules; the confirmation page is side-effect-free and the confirmed delete is a separate CSRF-protected POST.
 
 ### Parallel Opportunities
 
@@ -181,7 +202,7 @@ description: "Task list for Book Reviews (spec 010)"
 ### Incremental Delivery
 
 1. Setup + Foundational → domain tested.
-2. US1 → shelf live (MVP). 3. US2 → capture live. 4. US3 → polish. 5. US4 → edit existing notes. 6. Phase 7 → ship PR.
+2. US1 → shelf live (MVP). 3. US2 → capture live. 4. US3 → polish. 5. US4 → edit existing notes. 6. US5/US6 → series shelf and assignment flows. 7. Phase 7 → ship PR.
 
 ---
 
@@ -189,10 +210,18 @@ description: "Task list for Book Reviews (spec 010)"
 
 - [P] = different files, no dependency. Commit after each checkpoint (Conventional Commits).
 - Tests precede implementation per story (constitution Principle I); verify they fail first.
-- File-conflict watch: `books_handlers.go` (T012, T018, T029) and `run.go` (T008, T012, T018) are sequential by design.
+- File-conflict watch: `books_handlers.go` (T012, T018, T029, T033, T035) and `run.go` (T008, T012, T018) are sequential by design.
 
 
 ## Fallback Cover Completion (FR-005)
 
 - [X] T024 Add `internal/braind/webassets/static/book-cover-placeholder.svg` and render it with accessible alternative text whenever a configured cover is absent, unreadable, empty, corrupt, or unsupported.
 - [X] T025 Validate supported cover data and add unit tests in `internal/braind/books/catalog_test.go` for valid, absent, missing, invalid, unreadable, and path-escaping cover files.
+
+## Series Support (FR-019–FR-029)
+
+- [ ] T030 Add catalog tests for folder-derived membership, filename positions (including decimal and optional `Volume`/`Book` prefixes), unnumbered members, global newest-first ordering, and excluded overview notes; add a shelf contract test for per-entry series indicators and no series headings.
+- [X] T031 Derive first-level series names and filename positions during catalog scanning while retaining one flat list in the existing newest-first order.
+- [X] T032 Render one shelf list and show each series name and recognized volume position inside its book entry; do not add series headings or sublists.
+- [ ] T033 Add writer and HTTP tests for series creation, prefilled assignment fields, moving between series and standalone paths, invalid folder/number inputs, and collision-safe edits.
+- [X] T034 Add series and volume fields to create/edit forms; derive current values from paths and filenames; generate collision-safe series paths on create and move notes only when edit assignments change.

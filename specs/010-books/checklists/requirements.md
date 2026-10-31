@@ -41,3 +41,20 @@
   unusable attachments to render the bundled accessible fallback offline.
 - Edit existing book notes in place with role, CSRF, read-only, path-confinement, and
   unrelated-frontmatter preservation requirements.
+- The shelf presentation is specified semantically: a clickable `brain` breadcrumb,
+  responsive compact book rows, a writable-only primary create action, case-insensitive
+  search, Finished/Reading filters, an updated result count, and a no-match message.
+- The shelf displays cover art once and does not repeat the Obsidian cover-embed syntax in
+  the review text.
+- The landing, bookshelf, review forms, and authentication views share the same background,
+  text, surface, link, button, and form-control colors.
+- The search field and status filters share a height and align to the same vertical center line.
+- Create/edit forms reuse the shelf breadcrumb and page palette, group metadata separately
+  from review text, and retain readable actions on narrow screens.
+- Cover upload is specified for create and edit forms, including supported formats,
+  size and image validation, safe local attachment storage, and accessible errors.
+- Finished date defaults to today for new reviews and undated edit forms; existing
+  dates and submitted values survive form re-renders.
+- Review deletion requires a book-identifying confirmation page and an explicit
+  authorized, CSRF-validated confirmation; canceling preserves the note and deletion
+  leaves shared cover attachments untouched.
