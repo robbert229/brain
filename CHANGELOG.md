@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/robbert229/brain/compare/v0.3.0...v0.4.0) (2026-10-31)
+
+
+### Features
+
+* **auth:** require OIDC and protect the landing page ([#23](https://github.com/robbert229/brain/issues/23)) ([c2e68c7](https://github.com/robbert229/brain/commit/c2e68c7cdafe6983186d43f1d4186098a47b8c07))
+* **books:** add bookshelf with review capture and debug image ([#26](https://github.com/robbert229/brain/issues/26)) ([e86a3be](https://github.com/robbert229/brain/commit/e86a3be07418eb4cbe22e33297b8ccd8557f6175))
+* **books:** complete review and series workflows ([d67c16f](https://github.com/robbert229/brain/commit/d67c16f9e275da9999dc4a1287d86fec83ebcb41))
+* **web:** unify page serving and theme pages with vendored Pico CSS ([#25](https://github.com/robbert229/brain/issues/25)) ([1e1e9d1](https://github.com/robbert229/brain/commit/1e1e9d1995fc6076c3203ec5b6611711ba839ba4))
+
 ## [0.3.0](https://github.com/robbert229/brain/compare/v0.2.0...v0.3.0) (2026-10-27)
 
 
